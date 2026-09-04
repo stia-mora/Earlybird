@@ -6,7 +6,13 @@ import { escapeHtml, fullWidthPunctuation } from './utils.js';
 export async function captureEvidence({ tweetUrl, translation = '', outputPath, browser, launchOptions = {}, thread = [] } = {}) {
   if (!tweetUrl || !outputPath) throw new Error('tweetUrl and outputPath are required');
   await mkdir(dirname(outputPath), { recursive: true });
-  const ownBrowser = browser || await puppeteer.launch({ headless: true, ...launchOptions });
+  const sandboxArgs = process.env.PUPPETEER_NO_SANDBOX === 'true' ? ['--no-sandbox', '--disable-setuid-sandbox'] : [];
+  const ownBrowser = browser || await puppeteer.launch({
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    ...launchOptions,
+    args: [...sandboxArgs, ...(launchOptions.args || [])],
+  });
   const page = await ownBrowser.newPage();
   try {
     await page.setViewport({ width: 1280, height: 1000, deviceScaleFactor: 1 });

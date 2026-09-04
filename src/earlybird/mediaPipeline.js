@@ -36,7 +36,12 @@ export function createMediaPipeline({ prisma, outputDir = process.env.EARLYBIRD_
         const metadata = { tweetId: item.tweetId, width: item.width, height: item.height, altText: item.altText };
         if (kind === 'video') {
           const mp4 = `${base}.mp4`;
-          const transcoded = await ffmpeg(['-y', '-i', item.path, '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart', mp4]);
+          const transcoded = await ffmpeg([
+            '-y', '-i', item.path,
+            '-vf', 'scale=min(854\\,iw):-2',
+            '-c:v', 'libx264', '-preset', 'medium', '-crf', '28', '-maxrate', '1600k', '-bufsize', '3200k',
+            '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', mp4,
+          ]);
           if (transcoded) {
             localPath = mp4;
             metadata.posterPath = `${base}-poster.jpg`;

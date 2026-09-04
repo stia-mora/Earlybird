@@ -13,22 +13,45 @@ function getArticleQueue() {
   articleQueue ||= new Bull('earlybird-articles', process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`);
   return articleQueue;
 }
+
+async function enqueueArticleProcess(jobId) {
+  const queue = getArticleQueue();
+  const queueJobId = `earlybird-article-${jobId}`;
+  const existing = await queue.getJob(queueJobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === 'failed') {
+      await existing.retry();
+      return;
+    }
+    if (['active', 'waiting', 'delayed', 'paused'].includes(state)) return;
+    await existing.remove();
+  }
+  await queue.add('process', { jobId }, { jobId: queueJobId, removeOnComplete: 100, removeOnFail: 100 });
+}
 router.use(authMiddleware);
+
+function validWebsite(value) {
+  if (value == null || value === '') return true;
+  try { return new URL(String(value)).protocol === 'https:'; } catch { return false; }
+}
 
 router.get('/sources', async (_req, res) => res.json(await prisma.earlyBirdSource.findMany({ orderBy: { handle: 'asc' } })));
 router.post('/sources', async (req, res) => {
   try {
-    const handle = String(req.body.handle || '').replace(/^@/, '').trim();
+    const handle = String(req.body.handle || '').replace(/^@/, '').trim().toLowerCase();
     if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) return res.status(400).json({ error: 'handle must be 1-15 letters, digits, or underscores' });
-    const source = await prisma.earlyBirdSource.create({ data: { handle, displayName: req.body.displayName, enabled: req.body.enabled !== false, pollIntervalSeconds: Math.max(15, Number(req.body.pollIntervalSeconds || 60)) } });
+    if (!validWebsite(req.body.website)) return res.status(400).json({ error: 'website must be an HTTPS URL' });
+    const source = await prisma.earlyBirdSource.create({ data: { handle, displayName: req.body.displayName, website: req.body.website || null, enabled: req.body.enabled !== false, pollIntervalSeconds: Math.max(15, Number(req.body.pollIntervalSeconds || 60)) } });
     res.status(201).json(source);
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
 router.patch('/sources/:id', async (req, res) => {
   try {
     const data = {};
-    for (const key of ['displayName', 'enabled', 'handle']) if (req.body[key] !== undefined) data[key] = key === 'handle' ? String(req.body[key]).replace(/^@/, '').trim() : req.body[key];
+    for (const key of ['displayName', 'website', 'enabled', 'handle']) if (req.body[key] !== undefined) data[key] = key === 'handle' ? String(req.body[key]).replace(/^@/, '').trim().toLowerCase() : req.body[key];
     if (data.handle !== undefined && !/^[A-Za-z0-9_]{1,15}$/.test(data.handle)) return res.status(400).json({ error: 'handle must be 1-15 letters, digits, or underscores' });
+    if (!validWebsite(data.website)) return res.status(400).json({ error: 'website must be an HTTPS URL' });
     if (req.body.pollIntervalSeconds !== undefined) data.pollIntervalSeconds = Math.max(15, Number(req.body.pollIntervalSeconds));
     res.json(await prisma.earlyBirdSource.update({ where: { id: req.params.id }, data }));
   } catch (error) { res.status(400).json({ error: error.message }); }
@@ -48,7 +71,7 @@ router.get('/jobs/:id/preview', async (req, res) => {
 });
 router.post('/jobs/:id/retry', async (req, res) => {
   const job = await prisma.earlyBirdArticleJob.update({ where: { id: req.params.id }, data: { status: 'detected', error: null } });
-  await getArticleQueue().add('process', { jobId: job.id }, { jobId: `earlybird-article-${job.id}`, removeOnComplete: 100, removeOnFail: 100 });
+  await enqueueArticleProcess(job.id);
   res.status(202).json({ id: job.id, status: job.status, queued: true });
 });
 router.post('/jobs/:id/create-draft', async (req, res) => {

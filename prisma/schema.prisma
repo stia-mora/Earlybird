@@ -222,6 +222,7 @@ model EarlyBirdSource {
   id                  String                @id @default(cuid())
   handle              String                @unique
   displayName         String?
+  website             String?
   enabled             Boolean               @default(true)
   pollIntervalSeconds Int                   @default(60)
   baselineComplete    Boolean               @default(false)

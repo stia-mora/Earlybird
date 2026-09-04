@@ -1,0 +1,12 @@
+# Local dependencies, runtime state, and credentials are supplied by Docker or .env.
+node_modules
+.env
+.env.*
+.git
+.gitignore
+data
+test-output
+coverage
+.vscode
+.idea
+*.log

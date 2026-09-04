@@ -1,4 +1,4 @@
-import { DEFAULT_HANDLES, comparePosts } from './utils.js';
+import { DEFAULT_SOURCES, comparePosts } from './utils.js';
 
 function isNewer(post, source) {
   if (!source.lastSeenCreatedAt && !source.lastSeenPostId) return true;
@@ -10,11 +10,11 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
   if (!prisma) throw new Error('source monitor requires prisma');
   return {
     async ensureDefaults() {
-      for (const handle of DEFAULT_HANDLES) {
+      for (const source of DEFAULT_SOURCES) {
         await prisma.earlyBirdSource.upsert({
-          where: { handle },
+          where: { handle: source.handle },
           update: {},
-          create: { handle, displayName: handle, pollIntervalSeconds: 60 },
+          create: { ...source, pollIntervalSeconds: 60 },
         });
       }
     },
@@ -28,8 +28,8 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
         if (!source.baselineComplete) {
           const newest = ordered.at(-1);
           if (!newest) {
-            await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastPolledAt: now(), lastError: null } });
-            return { baseline: false, detected: 0 };
+            await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { baselineComplete: true, lastPolledAt: now(), lastError: null } });
+            return { baseline: true, detected: 0 };
           }
           await prisma.earlyBirdSource.update({ where: { id: source.id }, data: {
             baselineComplete: true,
@@ -70,5 +70,9 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
 
 export async function defaultScraperFactory() {
   const { createHttpScraper } = await import('../scrapers/twitter/http/index.js');
-  return createHttpScraper({ cookies: process.env.X_COOKIES || process.env.TWITTER_COOKIES });
+  return createHttpScraper({
+    cookies: process.env.X_COOKIES || process.env.TWITTER_COOKIES,
+    proxy: process.env.EARLYBIRD_X_PROXY || undefined,
+    rateLimitStrategy: 'wait',
+  });
 }

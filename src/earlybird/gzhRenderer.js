@@ -1,5 +1,13 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { escapeHtml, fullWidthPunctuation } from './utils.js';
+
+const execFileAsync = promisify(execFile);
+const validatorPath = fileURLToPath(new URL('../../scripts/validate_gzh_html.py', import.meta.url));
 
 const GRAPHITE = "max-width:677px;margin:0 auto;background:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#52525B;line-height:1.8;letter-spacing:0.3px;overflow-x:hidden;";
 const BODY = 'font-size:15px;color:#52525B;line-height:1.8;margin:0 0 18px;';
@@ -7,6 +15,28 @@ const BODY = 'font-size:15px;color:#52525B;line-height:1.8;margin:0 0 18px;';
 export async function loadGzhSources(root = new URL('../../vendor/references/gzh-design/references/', import.meta.url)) {
   const [theme, common] = await Promise.all([readFile(new URL('theme-graphite-minimal.md', root), 'utf8'), readFile(new URL('common-components.md', root), 'utf8')]);
   return { theme, common };
+}
+
+export async function validateGzhHtml(html, { run } = {}) {
+  const directory = await mkdtemp(join(tmpdir(), 'earlybird-gzh-'));
+  const path = join(directory, 'article.html');
+  try {
+    await writeFile(path, html, 'utf8');
+    const report = run
+      ? await run(path)
+      : (await execFileAsync(process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3'), [validatorPath, path], {
+        encoding: 'utf8',
+        windowsHide: true,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      })).stdout;
+    if (/\b(?:ERROR|WARNING)\b/.test(report)) throw new Error(report.trim());
+    return report;
+  } catch (error) {
+    const detail = [error.stdout, error.stderr, error.message].filter(Boolean).join('\n').trim();
+    throw new Error(`gzh HTML validation failed: ${detail}`);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 function markKeywords(text) {

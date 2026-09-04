@@ -579,6 +579,18 @@ export class TwitterAuth {
         },
       );
 
+      // X has retired this legacy REST endpoint for browser sessions. A 404
+      // does not invalidate the cookies; the following GraphQL request will
+      // still reject the session with 401/403 when it is actually unusable.
+      if (res.status === 404) {
+        return {
+          valid: true,
+          user: { id: '', username: '', name: '' },
+          reason: 'verify_credentials unavailable; deferred to GraphQL request',
+          status: res.status,
+        };
+      }
+
       if (!res.ok) {
         return {
           valid: false,

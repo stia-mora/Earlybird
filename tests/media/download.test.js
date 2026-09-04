@@ -125,6 +125,21 @@ describe('media targets', () => {
     expect(items.map((i) => i.num)).toEqual([1, 2]);
     expect(new Set(items.map((i) => renderTemplate('{tweet_id}_{num}.{ext}', i))).size).toBe(2);
   });
+
+  it('uses the best video URL from an already-normalised tweet', () => {
+    const [video] = itemsFromTweet({
+      id: '42',
+      author: { username: 'openai', id: '1' },
+      media: [{ type: 'video', url: 'https://pbs.twimg.com/media/thumbnail.jpg', videoUrl: 'https://video.twimg.com/amplify_video/clip.mp4', width: 1280, height: 720 }],
+    });
+    expect(video).toMatchObject({
+      tweetId: '42',
+      mediaType: 'video',
+      url: 'https://video.twimg.com/amplify_video/clip.mp4',
+      width: 1280,
+      height: 720,
+    });
+  });
 });
 
 describe('media archive', () => {

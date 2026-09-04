@@ -103,7 +103,19 @@ export function itemsFromTweet(tweet) {
     .map((entry, index) => {
       // Entries already normalised by parseMediaEntity keep their shape;
       // raw GraphQL entities are parsed here.
-      const entity = entry.mediaType ? entry : parseMediaEntity(entry, tweetId);
+      const entity = entry.mediaType
+        ? entry
+        : entry?.type && entry?.url
+          ? {
+            tweetId,
+            mediaType: entry.type,
+            url: entry.videoUrl || entry.url,
+            thumbnailUrl: entry.url,
+            width: entry.width || 0,
+            height: entry.height || 0,
+            altText: entry.altText || null,
+          }
+          : parseMediaEntity(entry, tweetId);
       if (!entity?.url) return null;
       return toItem(entity, { username, userId, createdAt, num: index + 1 });
     })

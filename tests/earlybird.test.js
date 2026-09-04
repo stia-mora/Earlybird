@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createSourceMonitor } from '../src/earlybird/sourceMonitor.js';
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { scoreHumanized } from '../src/earlybird/humanizer.js';
-import { renderGzhMarkdown } from '../src/earlybird/gzhRenderer.js';
+import { renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
 import { createWeChatClient } from '../src/earlybird/wechatClient.js';
+import { DEFAULT_SOURCES } from '../src/earlybird/utils.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -24,6 +25,16 @@ function prismaFixture() {
 }
 
 describe('EarlyBird source monitor', () => {
+  it('seeds the configured AI sources with their official websites', async () => {
+    const prisma = prismaFixture();
+    const monitor = createSourceMonitor({ prisma, scraperFactory: vi.fn() });
+    await monitor.ensureDefaults();
+    expect(prisma.earlyBirdSource.upsert).toHaveBeenCalledTimes(DEFAULT_SOURCES.length);
+    expect(prisma.earlyBirdSource.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ handle: 'openai', website: 'https://openai.com' }),
+    }));
+  });
+
   it('builds a baseline without enqueueing historical posts', async () => {
     const prisma = prismaFixture();
     const queue = { add: vi.fn() };
@@ -33,12 +44,37 @@ describe('EarlyBird source monitor', () => {
     expect(queue.add).not.toHaveBeenCalled();
     expect(prisma.earlyBirdSource.update).toHaveBeenCalled();
   });
+
+  it('completes an empty baseline so the first future post is detected', async () => {
+    const prisma = prismaFixture();
+    const monitor = createSourceMonitor({ prisma, scraperFactory: async () => ({ scrapeTweets: async () => [] }) });
+
+    const result = await monitor.pollSource('s1');
+
+    expect(result).toEqual({ baseline: true, detected: 0 });
+    expect(prisma.earlyBirdSource.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ baselineComplete: true }),
+    }));
+  });
 });
 
 describe('thread assembly and humanizer', () => {
   it('sorts a complete thread chronologically', async () => {
     const tweets = await assembleThread({ scraper: { scrapeFullThread: async () => [{ id: '2', createdAt: '2026-01-01T00:01:00Z' }, { id: '1', createdAt: '2026-01-01T00:00:00Z' }] }, post: { postId: '1' }, waitMs: 0 });
     expect(tweets.map(tweet => tweet.id)).toEqual(['1', '2']);
+  });
+  it('keeps the root post and author replies from the HTTP thread response', async () => {
+    const tweets = await assembleThread({
+      scraper: { scrapeFullThread: async () => ({ rootTweet: { id: '1', createdAt: '2026-01-01T00:00:00Z' }, authorReplies: [{ id: '2', createdAt: '2026-01-01T00:01:00Z' }] }) },
+      post: { postId: '1' },
+      waitMs: 0,
+    });
+    expect(tweets.map(tweet => tweet.id)).toEqual(['1', '2']);
+  });
+  it('falls back to the captured root post when thread collection fails', async () => {
+    const post = { postId: '1', rawData: { id: '1', text: 'root' } };
+    const tweets = await assembleThread({ scraper: { scrapeFullThread: async () => { throw new Error('rate limited'); } }, post, waitMs: 0, logger: { warn: vi.fn() } });
+    expect(tweets).toEqual([post.rawData]);
   });
   it('penalizes common AI traces', () => {
     expect(scoreHumanized('值得注意的是，在当今生态中不仅如此而且如此。')).toBeLessThan(45);
@@ -51,6 +87,12 @@ describe('Graphite renderer', () => {
     expect(html.startsWith('<section')).toBe(true);
     expect(html).not.toMatch(/<div|<style|<script|position:\s*(absolute|fixed|sticky)/i);
     expect(html).toContain('leaf=');
+  });
+  it('blocks HTML that has validator warnings before a draft can be created', async () => {
+    await expect(validateGzhHtml('<section><p>中文,半角标点</p></section>', { run: async () => 'WARNING ×1' })).rejects.toThrow('gzh HTML validation failed');
+  });
+  it('accepts a clean validator result', async () => {
+    await expect(validateGzhHtml('<section><p><span leaf="">中文。</span></p></section>', { run: async () => '完全合规' })).resolves.toBe('完全合规');
   });
 });
 

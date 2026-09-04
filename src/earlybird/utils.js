@@ -1,7 +1,19 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
-export const DEFAULT_HANDLES = ['openai', 'gemini', 'claude'];
+export const DEFAULT_SOURCES = [
+  { handle: 'openai', displayName: 'OpenAI', website: 'https://openai.com' },
+  { handle: 'chatgpt', displayName: 'ChatGPT', website: 'https://chatgpt.com' },
+  { handle: 'sama', displayName: 'Sam Altman', website: 'https://openai.com' },
+  { handle: 'thsottiaux', displayName: 'Thomas Sottiaux', website: 'https://openai.com' },
+  { handle: 'geminiapp', displayName: 'Google Gemini', website: 'https://gemini.google.com' },
+  { handle: 'googledeepmind', displayName: 'Google DeepMind', website: 'https://deepmind.google' },
+  { handle: 'claudeai', displayName: 'Claude', website: 'https://claude.ai' },
+  { handle: 'anthropicai', displayName: 'Anthropic', website: 'https://www.anthropic.com' },
+  { handle: 'grok', displayName: 'Grok', website: 'https://grok.com' },
+  { handle: 'xai', displayName: 'xAI', website: 'https://x.ai' },
+];
+export const DEFAULT_HANDLES = DEFAULT_SOURCES.map(source => source.handle);
 export const STAGES = ['detected', 'captured', 'analyzed', 'written', 'humanized', 'rendered', 'draft_created', 'verified', 'failed', 'manual_review'];
 
 export function postUrl(post) {

@@ -62,9 +62,9 @@ COPY . .
 
 # Create non-root user for security
 RUN groupadd -r xactions && useradd -r -g xactions -G audio,video xactions \
-    && mkdir -p /home/xactions/Downloads \
+    && mkdir -p /home/xactions/Downloads /app/data/earlybird/media \
     && chown -R xactions:xactions /home/xactions \
-    && chown -R xactions:xactions /app \
+    && chown -R xactions:xactions /app/data /app/node_modules/@prisma /app/node_modules/.prisma \
     && chmod +x /app/start.sh
 
 USER xactions

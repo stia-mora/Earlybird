@@ -64,6 +64,22 @@ services:
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PUPPETEER_HEADLESS: "true"
       PUPPETEER_NO_SANDBOX: "true"
+      X_COOKIES: ${X_COOKIES:-}
+      EARLYBIRD_X_PROXY: ${EARLYBIRD_X_PROXY:-}
+      EARLYBIRD_LLM_API_KEY: ${EARLYBIRD_LLM_API_KEY:-}
+      EARLYBIRD_LLM_BASE_URL: ${EARLYBIRD_LLM_BASE_URL:-https://api.openai.com/v1}
+      EARLYBIRD_LLM_MODEL: ${EARLYBIRD_LLM_MODEL:-gpt-4o-mini}
+      WECHAT_APP_ID: ${WECHAT_APP_ID:-}
+      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:-}
+      WECHAT_AUTHOR: ${WECHAT_AUTHOR:-}
+      EARLYBIRD_PUBLIC_MEDIA_URL: ${EARLYBIRD_PUBLIC_MEDIA_URL:-}
+      EARLYBIRD_MEDIA_DIR: /app/data/earlybird/media
+      EARLYBIRD_THREAD_WAIT_MS: ${EARLYBIRD_THREAD_WAIT_MS:-90000}
+      EARLYBIRD_THREAD_TIMEOUT_MS: ${EARLYBIRD_THREAD_TIMEOUT_MS:-60000}
+      EARLYBIRD_STT_API_KEY: ${EARLYBIRD_STT_API_KEY:-}
+      EARLYBIRD_STT_MODEL: ${EARLYBIRD_STT_MODEL:-gpt-4o-mini-transcribe}
+    volumes:
+      - earlybird_media:/app/data/earlybird/media
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,6 +117,12 @@ services:
       redis:
         condition: service_healthy
     command: ["node", "api/services/jobQueue.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"process.exit(0)\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
 
   # Independent EarlyBird X -> WeChat draft worker
   earlybird-worker:
@@ -114,12 +136,21 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       X_COOKIES: ${X_COOKIES:-}
+      EARLYBIRD_X_PROXY: ${EARLYBIRD_X_PROXY:-}
       EARLYBIRD_LLM_API_KEY: ${EARLYBIRD_LLM_API_KEY:-}
       EARLYBIRD_LLM_BASE_URL: ${EARLYBIRD_LLM_BASE_URL:-https://api.openai.com/v1}
       EARLYBIRD_LLM_MODEL: ${EARLYBIRD_LLM_MODEL:-gpt-4o-mini}
       WECHAT_APP_ID: ${WECHAT_APP_ID:-}
       WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:-}
+      WECHAT_AUTHOR: ${WECHAT_AUTHOR:-}
       EARLYBIRD_PUBLIC_MEDIA_URL: ${EARLYBIRD_PUBLIC_MEDIA_URL:-}
+      EARLYBIRD_MEDIA_DIR: /app/data/earlybird/media
+      EARLYBIRD_THREAD_WAIT_MS: ${EARLYBIRD_THREAD_WAIT_MS:-90000}
+      EARLYBIRD_THREAD_TIMEOUT_MS: ${EARLYBIRD_THREAD_TIMEOUT_MS:-60000}
+      EARLYBIRD_CONCURRENCY: ${EARLYBIRD_CONCURRENCY:-2}
+      EARLYBIRD_SOURCE_MIN_REQUEST_INTERVAL_MS: ${EARLYBIRD_SOURCE_MIN_REQUEST_INTERVAL_MS:-20000}
+      EARLYBIRD_STT_API_KEY: ${EARLYBIRD_STT_API_KEY:-}
+      EARLYBIRD_STT_MODEL: ${EARLYBIRD_STT_MODEL:-gpt-4o-mini-transcribe}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PUPPETEER_HEADLESS: "true"
       PUPPETEER_NO_SANDBOX: "true"
@@ -130,7 +161,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      api:
+        condition: service_healthy
     command: ["node", "src/earlybird/worker.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"process.exit(0)\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
 
 volumes:
   postgres_data:

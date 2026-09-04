@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { assembleThread } from './threadAssembler.js';
 import { analyzePost, createMultimodalClient } from './aiPipeline.js';
 import { humanize } from './humanizer.js';
-import { renderGzhMarkdown } from './gzhRenderer.js';
+import { renderGzhMarkdown, validateGzhHtml } from './gzhRenderer.js';
 import { captureEvidence } from './evidenceCapture.js';
 import { createMediaPipeline } from './mediaPipeline.js';
 import { createArticleWriter } from './articleWriter.js';
@@ -17,7 +17,12 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
       if (job.draft?.mediaId || (job.status === 'verified' && !force)) return job;
       try {
         const scraper = await scraperFactory(job.source);
-        const thread = await assembleThread({ scraper, post: job.post, waitMs: Number(process.env.EARLYBIRD_THREAD_WAIT_MS || 90000) });
+        const thread = await assembleThread({
+          scraper,
+          post: job.post,
+          waitMs: Number(process.env.EARLYBIRD_THREAD_WAIT_MS || 90000),
+          timeoutMs: Number(process.env.EARLYBIRD_THREAD_TIMEOUT_MS || 60000),
+        });
         await prisma.earlyBirdPost.update({ where: { id: job.postId }, data: { threadData: thread } });
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'captured', attempts: { increment: 1 }, error: null } });
         const evidencePath = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', `${job.post.postId}-evidence.png`);
@@ -35,6 +40,7 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const assetUrls = new Map();
         if (!wechatClient) {
           const html = await renderGzhMarkdown(polished.markdown, { evidencePath, title: article.title, digest: article.digest, sourceUrl: job.post.sourceUrl });
+          await validateGzhHtml(html);
           return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html } });
         }
         if (wechatClient?.uploadArticleImage) {
@@ -56,6 +62,7 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         }
         const markdownForRender = [...assetUrls.entries()].reduce((value, [localPath, url]) => value.replaceAll(localPath, url), polished.markdown);
         const html = await renderGzhMarkdown(markdownForRender, { evidencePath: evidenceSrc, title: article.title, digest: article.digest, sourceUrl: job.post.sourceUrl });
+        await validateGzhHtml(html);
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html } });
         const draft = await wechatClient.addDraft({ title: article.title.slice(0, 64), author: process.env.WECHAT_AUTHOR || '', digest: article.digest?.slice(0, 120), content: html, content_source_url: job.post.sourceUrl, thumb_media_id: thumb?.media_id || '' });
         const verified = await wechatClient.getDraft(draft.media_id);

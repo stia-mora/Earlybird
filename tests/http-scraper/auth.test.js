@@ -256,6 +256,20 @@ describe('validateSession', () => {
     expect(result.status).toBe(401);
   });
 
+  it('defers validation when X retires the legacy verify_credentials endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({}, { status: 404 }));
+    const auth = new TwitterAuth({ fetch: fetchMock });
+    auth.setCookies({ auth_token: 'at', ct0: 'ct' });
+
+    const result = await auth.validateSession();
+
+    expect(result).toMatchObject({
+      valid: true,
+      status: 404,
+      reason: expect.stringContaining('deferred to GraphQL'),
+    });
+  });
+
   it('returns invalid when response has no user ID', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       mockResponse({ name: 'No ID user' }),
