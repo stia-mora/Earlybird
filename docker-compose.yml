@@ -102,6 +102,37 @@ services:
         condition: service_healthy
     command: ["node", "api/services/jobQueue.js"]
 
+  # Independent EarlyBird X -> WeChat draft worker
+  earlybird-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://xactions:${POSTGRES_PASSWORD:-xactions_dev_password}@postgres:5432/xactions?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      X_COOKIES: ${X_COOKIES:-}
+      EARLYBIRD_LLM_API_KEY: ${EARLYBIRD_LLM_API_KEY:-}
+      EARLYBIRD_LLM_BASE_URL: ${EARLYBIRD_LLM_BASE_URL:-https://api.openai.com/v1}
+      EARLYBIRD_LLM_MODEL: ${EARLYBIRD_LLM_MODEL:-gpt-4o-mini}
+      WECHAT_APP_ID: ${WECHAT_APP_ID:-}
+      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:-}
+      EARLYBIRD_PUBLIC_MEDIA_URL: ${EARLYBIRD_PUBLIC_MEDIA_URL:-}
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      PUPPETEER_HEADLESS: "true"
+      PUPPETEER_NO_SANDBOX: "true"
+    volumes:
+      - earlybird_media:/app/data/earlybird/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["node", "src/earlybird/worker.js"]
+
 volumes:
   postgres_data:
   redis_data:
+  earlybird_media:

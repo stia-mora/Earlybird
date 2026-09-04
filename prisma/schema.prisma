@@ -217,3 +217,96 @@ model UnfollowerSchedule {
 
   @@index([active, nextRunAt])
 }
+
+model EarlyBirdSource {
+  id                  String                @id @default(cuid())
+  handle              String                @unique
+  displayName         String?
+  enabled             Boolean               @default(true)
+  pollIntervalSeconds Int                   @default(60)
+  baselineComplete    Boolean               @default(false)
+  lastSeenCreatedAt   DateTime?
+  lastSeenPostId      String?
+  lastPolledAt        DateTime?
+  lastError           String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  posts               EarlyBirdPost[]
+  jobs                EarlyBirdArticleJob[]
+}
+
+model EarlyBirdPost {
+  id             String                @id @default(cuid())
+  sourceId       String
+  postId         String
+  rootPostId     String?
+  sourceUrl      String
+  authorUsername String
+  text           String                @default("")
+  createdAt      DateTime?
+  rawData        Json
+  threadData     Json?
+  mediaData      Json?
+  capturedAt     DateTime              @default(now())
+  source         EarlyBirdSource       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  assets         EarlyBirdAsset[]
+  jobs           EarlyBirdArticleJob[]
+
+  @@unique([sourceId, postId])
+  @@index([rootPostId])
+  @@index([createdAt])
+}
+
+model EarlyBirdAsset {
+  id            String        @id @default(cuid())
+  postId        String
+  kind          String
+  sourceUrl     String
+  localPath     String?
+  publicUrl     String?
+  sha256        String?
+  mimeType      String?
+  status        String        @default("pending")
+  metadata      Json?
+  wechatMediaId String?
+  wechatUrl     String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  post          EarlyBirdPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, sourceUrl])
+  @@index([sha256])
+}
+
+model EarlyBirdArticleJob {
+  id             String          @id @default(cuid())
+  sourceId       String
+  postId         String          @unique
+  status         String          @default("detected")
+  attempts       Int             @default(0)
+  error          String?
+  markdown       String?
+  html           String?
+  humanizerScore Int?
+  metadata       Json?
+  detectedAt     DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  source         EarlyBirdSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  post           EarlyBirdPost   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  draft          EarlyBirdDraft?
+
+  @@index([status, updatedAt])
+}
+
+model EarlyBirdDraft {
+  id             String              @id @default(cuid())
+  jobId          String              @unique
+  mediaId        String              @unique
+  requestSummary Json?
+  verification   Json?
+  verified       Boolean             @default(false)
+  failureReason  String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  job            EarlyBirdArticleJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}

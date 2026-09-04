@@ -79,6 +79,7 @@ import graphRoutes from './routes/graph.js';
 import threadRoutes from './routes/thread.js';
 import unfollowersRoutes from './routes/unfollowers.js';
 import videoRoutes from './routes/video.js';
+import earlybirdRoutes from './routes/earlybird.js';
 // Competitive feature routes (09-A through 09-P)
 import historyRoutes from './routes/history.js';
 import scheduleRoutes from './routes/schedule.js';
@@ -339,6 +340,7 @@ export function createApp({ rateLimiting = true } = {}) {
   app.use('/api/unfollowers', unfollowersRoutes);
   app.use('/api/thread', threadRoutes);
   app.use('/api/video', videoRoutes);
+  app.use('/api/earlybird', earlybirdRoutes);
   app.use('/api/agent', agentRoutes);
   // Competitive feature routes (09-A through 09-P)
   app.use('/api/analytics', historyRoutes); // history, growth, overlap endpoints augment existing analytics

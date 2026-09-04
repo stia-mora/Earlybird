@@ -123,3 +123,6 @@ tmp/
 .mcp.json
 CLAUDE.local.md
 .husky/prepare-commit-msg
+
+# Local upstream clones; tracked snapshots live in vendor/references
+vendor/skills/
