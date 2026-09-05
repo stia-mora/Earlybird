@@ -140,7 +140,7 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', show
     if (!mediaPosterPath) await waitForTweetVideoFrame(shot);
     const [cardBox, video] = await Promise.all([
       shot.boundingBox(),
-      shot.$('[data-testid="videoPlayer"]'),
+      shot.$('[data-testid="videoPlayer"], [data-testid="tweetPhoto"]'),
     ]);
     if (!cardBox) throw new Error('X post card could not be measured; evidence screenshot was not created');
     const videoBox = video ? await video.boundingBox() : null;
