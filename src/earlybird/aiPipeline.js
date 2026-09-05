@@ -10,9 +10,9 @@ function extractJson(text) {
   }
 }
 
-export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY, baseUrl = process.env.EARLYBIRD_LLM_BASE_URL || 'https://api.openai.com/v1', model = process.env.EARLYBIRD_LLM_MODEL || 'gpt-4o-mini', fetchImpl = globalThis.fetch, timeoutMs = 90000, maxAttempts = 3 } = {}) {
+export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY, baseUrl = process.env.EARLYBIRD_LLM_BASE_URL || 'https://api.openai.com/v1', model = process.env.EARLYBIRD_LLM_MODEL || 'gpt-4o-mini', fetchImpl = globalThis.fetch, timeoutMs = 90000, maxAttempts = 3, maxTokens = Number(process.env.EARLYBIRD_LLM_MAX_TOKENS || 4096) } = {}) {
   return {
-    async complete({ system, user, images = [] }) {
+    async complete({ system, user, images = [], maxOutputTokens = maxTokens }) {
       if (!apiKey) throw new Error('EARLYBIRD_LLM_API_KEY is not configured');
       const content = [{ type: 'text', text: user }];
       for (const image of images) {
@@ -25,7 +25,7 @@ export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-          const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }, signal: controller.signal, body: JSON.stringify({ model, temperature: 0.4, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content }] }) });
+          const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }, signal: controller.signal, body: JSON.stringify({ model, temperature: 0.4, max_tokens: maxOutputTokens, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content }] }) });
           const payload = await response.json();
           if (!response.ok || payload.error) throw new Error(payload.error?.message || `LLM request failed (${response.status})`);
           return extractJson(payload.choices?.[0]?.message?.content || '');
