@@ -23,7 +23,7 @@ export async function humanize({ client, markdown, context = {}, rulesText } = {
   let score = 0;
   let attempts = 0;
   while (attempts <= 2) {
-    const result = await client.complete({ system: `严格执行 Humanizer-zh 的 24 类 AI 痕迹检查。保留事实和来源，不改变数字、专名和引用。规则摘录：\n${rules.slice(0, 12000)}\n只返回 JSON：markdown、score（总分 50）、changes。`, user: JSON.stringify({ markdown: current, context }) });
+    const result = await client.complete({ system: `严格执行 Humanizer-zh 的 24 类 AI 痕迹检查。保留事实和来源，不改变数字、专名、链接和引用。不得把文章重写成固定六段式；保留现有动态小标题。contentType 为 brief 时不得新增小标题。规则摘录：\n${rules.slice(0, 12000)}\n只返回 JSON：markdown、score（总分 50）、changes。`, user: JSON.stringify({ markdown: current, context }) });
     current = result?.markdown || current;
     score = Number(result?.score) || scoreHumanized(current);
     attempts += 1;

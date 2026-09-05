@@ -14,7 +14,7 @@ export const DEFAULT_SOURCES = [
   { handle: 'xai', displayName: 'xAI', website: 'https://x.ai' },
 ];
 export const DEFAULT_HANDLES = DEFAULT_SOURCES.map(source => source.handle);
-export const STAGES = ['detected', 'captured', 'analyzed', 'written', 'humanized', 'rendered', 'draft_created', 'verified', 'failed', 'manual_review'];
+export const STAGES = ['detected', 'classified', 'held', 'ignored', 'merged', 'captured', 'analyzed', 'written', 'humanized', 'rendered', 'draft_created', 'verified', 'failed', 'manual_review'];
 
 export function postUrl(post) {
   const username = post?.author?.username || post?.username || post?.authorUsername || 'i';

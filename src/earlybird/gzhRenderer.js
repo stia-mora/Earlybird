@@ -66,7 +66,7 @@ function inline(text) {
   return markKeywords(value);
 }
 
-export async function renderGzhMarkdown(markdown, { evidencePath, title, digest, sourceUrl } = {}) {
+export async function renderGzhMarkdown(markdown, { evidencePath, title, digest, sourceUrl, sourceNote, contentType } = {}) {
   await loadGzhSources();
   const lines = String(markdown || '').replace(/\r/g, '').split('\n');
   const sections = [];
@@ -80,14 +80,15 @@ export async function renderGzhMarkdown(markdown, { evidencePath, title, digest,
     const heading = line.match(/^##\s+(.+)/);
     if (heading) { current = { title: heading[1], body: [] }; sections.push(current); continue; }
     if (line.startsWith('# ')) continue;
-    if (line.trim()) { if (!current) { current = { title: '导读', body: [] }; sections.push(current); } current.body.push(line); }
+    if (line.trim()) { if (!current) { current = { title: contentType === 'brief' ? null : '导读', body: [] }; sections.push(current); } current.body.push(line); }
   }
   let html = `<section style="${GRAPHITE}">`;
-  if (evidencePath) html += `<section style="padding:10px 10px 24px;"><img src="${escapeHtml(evidencePath)}" style="max-width:100%;height:auto;display:block;margin:0 auto;"><p style="font-size:12px;color:#A1A1AA;margin:8px 0 0;text-align:center;"><span leaf="">原帖证据截图</span></p></section>`;
+  if (evidencePath) html += `<section style="padding:10px 10px 24px;"><img src="${escapeHtml(evidencePath)}" style="max-width:100%;height:auto;display:block;margin:0 auto;"><p style="font-size:12px;color:#A1A1AA;margin:8px 0 0;text-align:center;"><span leaf="">原帖证据与中文翻译</span></p></section>`;
   if (title) html += `<h1 style="font-size:24px;line-height:1.4;color:#27272A;margin:24px 10px 12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(title))}</span></h1>`;
   if (digest) html += `<p style="font-size:16px;color:#3F3F46;margin:0 10px 24px;border-left:3px solid #52525B;padding-left:12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(digest))}</span></p>`;
   sections.forEach((section, index) => {
-    html += `<section style="margin-top:${index ? 56 : 16}px;margin-bottom:28px;padding:0 10px;"><section style="padding-bottom:14px;border-bottom:1px solid #E4E4E7;"><p style="font-size:42px;font-weight:900;color:#E4E4E7;margin:0;line-height:1;"><span leaf="">${String(index + 1).padStart(2, '0')}</span></p><h3 style="font-size:20px;font-weight:800;color:#27272A;margin:0;line-height:1.4;"><span leaf="">${escapeHtml(fullWidthPunctuation(section.title))}</span></h3></section>`;
+    html += `<section style="margin-top:${index ? 56 : 16}px;margin-bottom:28px;padding:0 10px;">`;
+    if (section.title) html += `<section style="padding-bottom:14px;border-bottom:1px solid #E4E4E7;"><p style="font-size:42px;font-weight:900;color:#E4E4E7;margin:0;line-height:1;"><span leaf="">${String(index + 1).padStart(2, '0')}</span></p><h3 style="font-size:20px;font-weight:800;color:#27272A;margin:0;line-height:1.4;"><span leaf="">${escapeHtml(fullWidthPunctuation(section.title))}</span></h3></section>`;
     for (const item of section.body) {
       const image = item.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       if (image) {
@@ -101,6 +102,7 @@ export async function renderGzhMarkdown(markdown, { evidencePath, title, digest,
     }
     html += '</section>';
   });
-  if (sourceUrl) html += `<p style="font-size:12px;color:#A1A1AA;margin:32px 10px;text-align:center;"><span leaf="">来源：${escapeHtml(sourceUrl)}</span></p>`;
+  const provenance = sourceNote || '本文为信息整理与翻译，转载前请确认平台规则及版权授权。';
+  html += `<p style="font-size:12px;color:#A1A1AA;margin:32px 10px;text-align:center;"><span leaf="">${escapeHtml(fullWidthPunctuation(provenance))}</span>${sourceUrl ? ` <a href="${escapeHtml(sourceUrl)}" style="color:#52525B;text-decoration:underline;"><span leaf="">查看 X 原文</span></a>` : ''}</p>`;
   return `${html}</section>`;
 }
