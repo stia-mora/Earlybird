@@ -26,7 +26,13 @@ export function comparePosts(a, b) {
   const ad = Date.parse(a?.createdAt || '') || 0;
   const bd = Date.parse(b?.createdAt || '') || 0;
   if (ad !== bd) return ad - bd;
-  try { return BigInt(a?.id || 0) < BigInt(b?.id || 0) ? -1 : 1; } catch { return String(a?.id || '').localeCompare(String(b?.id || '')); }
+  try {
+    const aid = BigInt(a?.id || 0);
+    const bid = BigInt(b?.id || 0);
+    return aid === bid ? 0 : aid < bid ? -1 : 1;
+  } catch {
+    return String(a?.id || '').localeCompare(String(b?.id || ''));
+  }
 }
 
 export function sha256(buffer) {

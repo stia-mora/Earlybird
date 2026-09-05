@@ -7,7 +7,7 @@ import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { assertGzhTypography, renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
 import { createWeChatClient } from '../src/earlybird/wechatClient.js';
-import { DEFAULT_SOURCES } from '../src/earlybird/utils.js';
+import { comparePosts, DEFAULT_SOURCES } from '../src/earlybird/utils.js';
 import { classifyEditorial, normalizeEditorialDecision } from '../src/earlybird/editorialClassifier.js';
 import { isOfficialUrl, normalizeSearchQueries, officialHosts } from '../src/earlybird/researchBrowser.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
@@ -36,6 +36,11 @@ function prismaFixture() {
 }
 
 describe('EarlyBird source monitor', () => {
+  it('treats a post at the saved cursor as already seen', () => {
+    const post = { id: '2096133504417616165', createdAt: '2026-09-05T07:09:06.000Z' };
+    expect(comparePosts(post, post)).toBe(0);
+  });
+
   it('reuses one authenticated scraper across source polls', async () => {
     const scraper = { scrapeTweets: vi.fn() };
     const factory = vi.fn(async () => scraper);
