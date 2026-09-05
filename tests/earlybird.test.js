@@ -3,14 +3,14 @@ import { join } from 'node:path';
 import { cacheScraperFactory, createSourceMonitor, retryAtFromRateLimit } from '../src/earlybird/sourceMonitor.js';
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
-import { renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
+import { assertGzhTypography, renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
 import { createWeChatClient } from '../src/earlybird/wechatClient.js';
 import { DEFAULT_SOURCES } from '../src/earlybird/utils.js';
 import { classifyEditorial, normalizeEditorialDecision } from '../src/earlybird/editorialClassifier.js';
 import { isOfficialUrl, normalizeSearchQueries, officialHosts } from '../src/earlybird/researchBrowser.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline } from '../src/earlybird/pipeline.js';
-import { articleVisualAssets } from '../src/earlybird/articleWriter.js';
+import { articleVisualAssets, compactEditorialMarkdown, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH } from '../src/earlybird/articleWriter.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -119,7 +119,9 @@ describe('thread assembly and humanizer', () => {
   it('does not let humanization collapse an event story into a summary', async () => {
     const markdown = `## 时间线\n\n${'官方消息提供了可核查的时间线与发布范围。'.repeat(70)}`;
     const result = await humanize({ client: { complete: async () => ({ markdown: '一句摘要。', score: 50 }) }, markdown, context: { editorial: { contentType: 'event' } } });
-    expect(result.markdown).toBe(markdown);
+    expect(markdownBodyLength(result.markdown)).toBe(markdownBodyLength(markdown));
+    expect(markdownHeadingCount(result.markdown)).toBe(markdownHeadingCount(markdown));
+    expect(hasCompactPresentation(result.markdown)).toBe(true);
   });
   it('makes video posters and keyframes available as article evidence', () => {
     const visuals = articleVisualAssets([{ id: 'v1', kind: 'video', sourceUrl: 'https://x.com/video', metadata: { posterPath: 'poster.jpg', keyframes: ['frame-1.jpg', 'frame-2.jpg'] } }]);
@@ -128,6 +130,16 @@ describe('thread assembly and humanizer', () => {
   it('keeps X post screenshots alongside downloaded media', () => {
     const visuals = articleVisualAssets([{ kind: 'x-post-evidence', sourceUrl: 'https://x.com/openai/status/1', localPath: 'post-evidence.png' }]);
     expect(visuals).toEqual([expect.objectContaining({ localPath: 'post-evidence.png', kind: 'x-post-evidence' })]);
+  });
+  it('removes Markdown emphasis and breaks article paragraphs into readable lengths', () => {
+    const markdown = `- **启动阶段（Day 0）**：__系统先从零开始建立形式化陈述网络__，并逐步验证每一个可以复核的推理节点。${'系统先从零开始建立形式化陈述网络，并逐步验证每一个可以复核的推理节点。'.repeat(5)}`;
+    const compact = compactEditorialMarkdown(markdown);
+
+    expect(compact).not.toContain('**');
+    expect(compact).not.toContain('__');
+    expect(compact).not.toContain('\n* ');
+    expect(hasCompactPresentation(compact)).toBe(true);
+    expect(compact.split('\n').every(line => !line.trim() || /^[-#]/.test(line) || line.length <= MAX_PARAGRAPH_LENGTH)).toBe(true);
   });
 });
 
@@ -157,6 +169,17 @@ describe('Graphite renderer', () => {
     expect(html).toContain('https://openai.com/inside');
     expect(html).not.toContain('查看 X 原文');
     expect(html).not.toContain('<a ');
+  });
+  it('does not render raw Markdown symbols or oversized body paragraphs', async () => {
+    const markdown = `## 推进过程\n\n- **启动阶段（Day 0）**：${'系统先从零开始建立形式化陈述网络，并逐步验证每一个可以复核的推理节点。'.repeat(5)}`;
+    const html = await renderGzhMarkdown(markdown, { title: '测试标题' });
+
+    expect(html).not.toContain('**');
+    expect(() => assertGzhTypography(html)).not.toThrow();
+    await expect(validateGzhHtml(html, { run: async () => '完全合规' })).resolves.toBe('完全合规');
+  });
+  it('blocks raw Markdown emphasis that reaches the final HTML', async () => {
+    await expect(validateGzhHtml('<section><p style="font-size:15px;">**不应出现**</p></section>', { run: async () => '完全合规' })).rejects.toThrow('raw Markdown emphasis');
   });
 });
 

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { escapeHtml, fullWidthPunctuation } from './utils.js';
+import { compactEditorialMarkdown, MAX_PARAGRAPH_LENGTH } from './articleWriter.js';
 
 const execFileAsync = promisify(execFile);
 const validatorPath = fileURLToPath(new URL('../../scripts/validate_gzh_html.py', import.meta.url));
@@ -21,6 +22,7 @@ export async function validateGzhHtml(html, { run } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'earlybird-gzh-'));
   const path = join(directory, 'article.html');
   try {
+    assertGzhTypography(html);
     await writeFile(path, html, 'utf8');
     const report = run
       ? await run(path)
@@ -39,6 +41,15 @@ export async function validateGzhHtml(html, { run } = {}) {
   }
 }
 
+export function assertGzhTypography(html) {
+  if (/\*{2,}/.test(html)) throw new Error('raw Markdown emphasis marker found in HTML');
+  const paragraphs = [...String(html).matchAll(/<p style="font-size:15px[^\"]*">([\s\S]*?)<\/p>/g)];
+  for (const paragraph of paragraphs) {
+    const text = paragraph[1].replace(/<[^>]+>/g, '').replace(/&(?:nbsp|amp|lt|gt|quot);/g, ' ').trim();
+    if (text.length > MAX_PARAGRAPH_LENGTH) throw new Error(`body paragraph exceeds ${MAX_PARAGRAPH_LENGTH} characters`);
+  }
+}
+
 function markKeywords(text) {
   const plain = fullWidthPunctuation(text).trim();
   if (!plain) return '';
@@ -51,7 +62,7 @@ function markKeywords(text) {
 function inline(text) {
   const withoutLinks = String(text).replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1');
   let value = escapeHtml(fullWidthPunctuation(withoutLinks));
-  value = value.replace(/\*\*(.+?)\*\*/g, '<strong><span leaf="$1">$1</span></strong>');
+  value = value.replace(/\*\*(.+?)\*\*/g, '<strong><span leaf="">$1</span></strong>');
   if (value.includes('<')) {
     return value.replace(/(^|>)([^<]+)(?=<|$)/g, (match, prefix, text) => {
       if (!/[\u4e00-\u9fff]/.test(text) || text.includes('leaf=')) return match;
@@ -74,7 +85,9 @@ function referenceUrls(references) {
 
 export async function renderGzhMarkdown(markdown, { title, digest, contentType, references = [] } = {}) {
   await loadGzhSources();
-  const lines = String(markdown || '').replace(/\r/g, '').split('\n');
+  const lines = compactEditorialMarkdown(markdown).split('\n');
+  const safeTitle = compactEditorialMarkdown(title).replace(/\s*\n\s*/g, ' ');
+  const safeDigest = compactEditorialMarkdown(digest).replace(/\s*\n\s*/g, ' ');
   const sections = [];
   let current = null;
   let inCode = false;
@@ -89,8 +102,8 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
     if (line.trim()) { if (!current) { current = { title: null, body: [] }; sections.push(current); } current.body.push(line); }
   }
   let html = `<section style="${GRAPHITE}">`;
-  if (title) html += `<h1 style="font-size:24px;line-height:1.4;color:#27272A;margin:24px 10px 12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(title))}</span></h1>`;
-  if (digest) html += `<p style="font-size:16px;color:#3F3F46;margin:0 10px 24px;border-left:3px solid #52525B;padding-left:12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(digest))}</span></p>`;
+  if (safeTitle) html += `<h1 style="font-size:24px;line-height:1.4;color:#27272A;margin:24px 10px 12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(safeTitle))}</span></h1>`;
+  if (safeDigest) html += `<p style="font-size:16px;color:#3F3F46;margin:0 10px 24px;border-left:3px solid #52525B;padding-left:12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(safeDigest))}</span></p>`;
   let headingNumber = 0;
   sections.forEach((section, index) => {
     html += `<section style="margin-top:${index ? 56 : 16}px;margin-bottom:28px;padding:0 10px;">`;
@@ -98,10 +111,10 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
     for (const item of section.body) {
       const image = item.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       if (image) {
-        html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(image[1])}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
+        html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(compactEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' '))}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
         continue;
       }
-      if (/^[-*]\s+/.test(item)) { html += `<p style="${BODY}padding-left:14px;"> <span leaf="">• </span>${markKeywords(item.replace(/^[-*]\s+/, ''))}</p>`; continue; }
+      if (/^[-*]\s+/.test(item)) { html += `<p style="${BODY}padding-left:14px;"> <span leaf="">• </span>${inline(item.replace(/^[-*]\s+/, ''))}</p>`; continue; }
       if (/^>\s?/.test(item)) { html += `<p style="${BODY}border-left:3px solid #52525B;padding-left:12px;color:#3F3F46;"><span leaf="">${escapeHtml(fullWidthPunctuation(item.replace(/^>\s?/, '')))}</span></p>`; continue; }
       html += `<p style="${BODY}">${inline(item)}</p>`;
     }
