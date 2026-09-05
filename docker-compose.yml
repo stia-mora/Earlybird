@@ -85,9 +85,14 @@ services:
       EARLYBIRD_RESEARCH_MAX_PAGES: ${EARLYBIRD_RESEARCH_MAX_PAGES:-4}
       EARLYBIRD_STT_API_KEY: ${EARLYBIRD_STT_API_KEY:-}
       EARLYBIRD_STT_MODEL: ${EARLYBIRD_STT_MODEL:-gpt-4o-mini-transcribe}
+      EARLYBIRD_HERMES_RELAY_URL: ${EARLYBIRD_HERMES_RELAY_URL:-http://host.docker.internal:8767/notify}
+      EARLYBIRD_HERMES_RELAY_TOKEN_FILE: /run/secrets/earlybird-hermes-relay-token
     volumes:
       - earlybird_media:/app/data/earlybird/media
       - ./data/earlybird/x.com_cookies.txt:/run/secrets/earlybird-x-cookies.txt:ro
+      - ./data/earlybird/hermes-relay.token:/run/secrets/earlybird-hermes-relay-token:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -169,12 +174,18 @@ services:
       EARLYBIRD_SOURCE_POLL_TIMEOUT_MS: ${EARLYBIRD_SOURCE_POLL_TIMEOUT_MS:-30000}
       EARLYBIRD_STT_API_KEY: ${EARLYBIRD_STT_API_KEY:-}
       EARLYBIRD_STT_MODEL: ${EARLYBIRD_STT_MODEL:-gpt-4o-mini-transcribe}
+      EARLYBIRD_HERMES_RELAY_URL: ${EARLYBIRD_HERMES_RELAY_URL:-http://host.docker.internal:8767/notify}
+      EARLYBIRD_HERMES_RELAY_TOKEN_FILE: /run/secrets/earlybird-hermes-relay-token
+      EARLYBIRD_DAILY_SUMMARY_CRON: ${EARLYBIRD_DAILY_SUMMARY_CRON:-0 21 * * *}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PUPPETEER_HEADLESS: "true"
       PUPPETEER_NO_SANDBOX: "true"
     volumes:
       - earlybird_media:/app/data/earlybird/media
       - ./data/earlybird/x.com_cookies.txt:/run/secrets/earlybird-x-cookies.txt:ro
+      - ./data/earlybird/hermes-relay.token:/run/secrets/earlybird-hermes-relay-token:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

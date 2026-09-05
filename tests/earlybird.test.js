@@ -14,6 +14,8 @@ import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceC
 import { createArticlePipeline } from '../src/earlybird/pipeline.js';
 import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH } from '../src/earlybird/articleWriter.js';
 import { enqueueInterruptedJobs } from '../src/earlybird/jobRecovery.js';
+import { buildDailySummary } from '../src/earlybird/dailySummary.js';
+import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -104,6 +106,49 @@ describe('EarlyBird source monitor', () => {
     expect(prisma.earlyBirdSource.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ lastError: 'source poll timed out after 1ms' }),
     }));
+  });
+
+  it('records a visible no-new result for every successful empty poll', async () => {
+    const source = { id: 's1', handle: 'openai', enabled: true, baselineComplete: true, lastSeenCreatedAt: new Date('2026-01-01T00:00:00Z'), lastSeenPostId: '1' };
+    const prisma = {
+      earlyBirdSource: { findUnique: vi.fn(async () => source), update: vi.fn(async () => source) },
+      earlyBirdPoll: { create: vi.fn(async ({ data }) => data) },
+    };
+    const monitor = createSourceMonitor({ prisma, scraperFactory: async () => ({ scrapeTweets: async () => [] }), now: () => new Date('2026-01-01T00:01:00Z') });
+    await expect(monitor.pollSource('s1')).resolves.toEqual({ baseline: false, detected: 0 });
+    expect(prisma.earlyBirdPoll.create).toHaveBeenCalledWith({ data: expect.objectContaining({ sourceId: 's1', outcome: 'no_new', detectedCount: 0 }) });
+  });
+});
+
+describe('EarlyBird Hermes notifications', () => {
+  it('sends a verified draft through the local Hermes relay', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, text: async () => '{"status":"sent"}' }));
+    const notifier = createHermesNotifier({ url: 'http://relay/notify', token: 'test-token', fetchImpl });
+    await notifier.draftReady({
+      job: { id: 'j1', metadata: { editorial: { contentType: 'explainer' } } },
+      draft: { mediaId: 'media-1', requestSummary: { title: '测试草稿' } },
+      source: { handle: 'openai' },
+      post: { postId: '1' },
+    });
+    expect(fetchImpl).toHaveBeenCalledWith('http://relay/notify', expect.objectContaining({
+      headers: expect.objectContaining({ authorization: 'Bearer test-token' }),
+      body: expect.stringContaining('测试草稿'),
+    }));
+  });
+
+  it('summarizes today’s drafts and why the remaining posts were not produced', async () => {
+    const prisma = {
+      earlyBirdSource: { findMany: vi.fn(async () => [{ id: 's1', handle: 'openai' }, { id: 's2', handle: 'geminiapp' }]) },
+      earlyBirdPost: { findMany: vi.fn(async () => [
+        { sourceId: 's1', postId: '1', text: '已制作为草稿的消息', source: { handle: 'openai' }, jobs: [{ status: 'verified', draft: { verified: true } }] },
+        { sourceId: 's1', postId: '2', text: '不应制作为草稿的对话', source: { handle: 'openai' }, jobs: [{ status: 'ignored', metadata: { editorial: { reason: '只是日常对话，没有独立新闻价值。' } } }] },
+        { sourceId: 's2', postId: '3', text: '关联动态', source: { handle: 'geminiapp' }, jobs: [{ status: 'merged' }] },
+      ]) },
+    };
+    const summary = await buildDailySummary({ prisma, now: new Date('2026-09-05T12:00:00Z') });
+    expect(summary).toMatchObject({ detectedPosts: 3, verifiedDrafts: 1 });
+    expect(summary.message).toContain('编辑筛选');
+    expect(summary.message).toContain('已并入同一事件的主稿');
   });
 });
 

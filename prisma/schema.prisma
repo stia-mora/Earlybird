@@ -234,6 +234,21 @@ model EarlyBirdSource {
   updatedAt           DateTime              @updatedAt
   posts               EarlyBirdPost[]
   jobs                EarlyBirdArticleJob[]
+  polls               EarlyBirdPoll[]
+}
+
+model EarlyBirdPoll {
+  id            String          @id @default(cuid())
+  sourceId      String
+  outcome       String
+  detectedCount Int             @default(0)
+  postIds       Json?
+  error         String?
+  polledAt      DateTime        @default(now())
+  source        EarlyBirdSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId, polledAt])
+  @@index([outcome, polledAt])
 }
 
 model EarlyBirdPost {
@@ -310,4 +325,19 @@ model EarlyBirdDraft {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   job            EarlyBirdArticleJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model EarlyBirdNotification {
+  id        String   @id @default(cuid())
+  dedupeKey String   @unique
+  kind      String
+  status    String   @default("pending")
+  payload   Json
+  error     String?
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind, createdAt])
+  @@index([status, updatedAt])
 }

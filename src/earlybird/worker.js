@@ -1,15 +1,19 @@
 import Bull from 'bull';
+import cron from 'node-cron';
 import { PrismaClient } from '@prisma/client';
 import { createArticlePipeline } from './pipeline.js';
 import { cacheScraperFactory, createSourceMonitor, defaultScraperFactory, retryAtFromRateLimit } from './sourceMonitor.js';
 import { enqueueInterruptedJobs } from './jobRecovery.js';
 import { pollIntervalMs, startupPollDelay } from './sourcePollTiming.js';
+import { buildDailySummary } from './dailySummary.js';
+import { createHermesNotifier } from './hermesNotifier.js';
 
 const redisUrl = process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`;
 const prisma = new PrismaClient();
 const queue = new Bull('earlybird-articles', redisUrl);
 const monitorQueue = new Bull('earlybird-source-monitor', redisUrl);
-const pipeline = createArticlePipeline({ prisma, scraperFactory: defaultScraperFactory });
+const notifier = createHermesNotifier({ prisma });
+const pipeline = createArticlePipeline({ prisma, scraperFactory: defaultScraperFactory, notifier });
 const monitor = createSourceMonitor({
   prisma,
   queue,
@@ -65,6 +69,13 @@ async function scheduleNextSourcePoll(sourceId, startedAt, rateLimitedUntil = nu
   await enqueueSourcePoll(source, Math.max(regularDelay, rateLimitDelay));
 }
 
+async function sendDailySummary() {
+  const summary = await buildDailySummary({ prisma });
+  const delivery = await notifier.dailySummary(summary);
+  console.log(`EarlyBird daily summary ${summary.day}: ${delivery.status}`);
+  return delivery;
+}
+
 await monitor.ensureDefaults();
 queue.process('process', Number(process.env.EARLYBIRD_CONCURRENCY || 1), async job => {
   const result = await pipeline.process(job.data.jobId);
@@ -107,6 +118,9 @@ async function scheduleSources() {
 await scheduleSources();
 const recoveredJobs = await enqueueInterruptedJobs({ prisma, queue });
 if (recoveredJobs) console.warn(`EarlyBird recovered ${recoveredJobs} interrupted article job(s)`);
+const dailySummaryTask = cron.schedule(process.env.EARLYBIRD_DAILY_SUMMARY_CRON || '0 21 * * *', () => {
+  sendDailySummary().catch(error => console.error('EarlyBird daily summary failed', error.message));
+}, { timezone: 'Asia/Shanghai', noOverlap: true });
 console.log(`EarlyBird worker ready (${await prisma.earlyBirdSource.count()} sources)`);
 
-process.on('SIGTERM', async () => { await queue.close(); await monitorQueue.close(); await prisma.$disconnect(); process.exit(0); });
+process.on('SIGTERM', async () => { dailySummaryTask.stop(); await queue.close(); await monitorQueue.close(); await prisma.$disconnect(); process.exit(0); });

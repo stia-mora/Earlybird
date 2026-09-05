@@ -57,6 +57,13 @@ router.patch('/sources/:id', async (req, res) => {
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
 router.delete('/sources/:id', async (req, res) => { await prisma.earlyBirdSource.delete({ where: { id: req.params.id } }); res.status(204).end(); });
+router.get('/polls', async (req, res) => {
+  const where = {};
+  if (req.query.sourceId) where.sourceId = String(req.query.sourceId);
+  if (req.query.outcome) where.outcome = String(req.query.outcome);
+  res.json(await prisma.earlyBirdPoll.findMany({ where, include: { source: true }, orderBy: { polledAt: 'desc' }, take: Math.min(200, Number(req.query.limit || 50)) }));
+});
+router.get('/notifications', async (req, res) => res.json(await prisma.earlyBirdNotification.findMany({ orderBy: { createdAt: 'desc' }, take: Math.min(100, Number(req.query.limit || 50)) })));
 router.get('/jobs', async (req, res) => res.json(await prisma.earlyBirdArticleJob.findMany({ where: req.query.status ? { status: String(req.query.status) } : undefined, include: { source: true, post: true, draft: true }, orderBy: { updatedAt: 'desc' }, take: Math.min(100, Number(req.query.limit || 50)) })));
 router.get('/jobs/:id', async (req, res) => {
   const job = await prisma.earlyBirdArticleJob.findUnique({ where: { id: req.params.id }, include: { source: true, post: { include: { assets: true } }, draft: true } });

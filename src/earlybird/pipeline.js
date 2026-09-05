@@ -9,6 +9,7 @@ import { articleVisualAssets, createArticleWriter } from './articleWriter.js';
 import { createWeChatClient } from './wechatClient.js';
 import { classifyEditorial } from './editorialClassifier.js';
 import { collectResearchImages, researchOfficialSources } from './researchBrowser.js';
+import { createHermesNotifier } from './hermesNotifier.js';
 
 const MERGEABLE_STATUSES = ['detected', 'classified', 'held', 'captured', 'failed'];
 
@@ -63,7 +64,7 @@ function videoPosterPath(assets) {
   return video?.metadata?.posterPath || video?.metadata?.keyframes?.find(Boolean);
 }
 
-export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, logger = console } = {}) {
+export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, notifier = createHermesNotifier({ prisma }), logger = console } = {}) {
   const writer = createArticleWriter({ client: llmClient });
   return {
     async process(jobId, { force = false } = {}) {
@@ -166,8 +167,14 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const draft = await wechatClient.addDraft({ title: article.title.slice(0, 64), author: process.env.WECHAT_AUTHOR || '', digest: article.digest?.slice(0, 120), content: html, content_source_url: '', thumb_media_id: thumb?.media_id || '' });
         const verified = await wechatClient.getDraft(draft.media_id);
         if (!verified?.news_item && !verified?.media_id) throw new Error('WeChat draft verification returned no article');
-        await prisma.earlyBirdDraft.upsert({ where: { jobId: job.id }, update: { mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl } }, create: { jobId: job.id, mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl } } });
-        return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'verified' } });
+        const storedDraft = await prisma.earlyBirdDraft.upsert({ where: { jobId: job.id }, update: { mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl } }, create: { jobId: job.id, mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl } } });
+        const completedJob = await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'verified' } });
+        try {
+          await notifier?.draftReady({ job: { ...job, ...completedJob, metadata: analysisMetadata }, draft: storedDraft, source: job.source, post: job.post });
+        } catch (notificationError) {
+          logger.warn?.('EarlyBird draft notification failed', job.id, notificationError.message);
+        }
+        return completedJob;
       } catch (error) {
         logger.error?.('EarlyBird article failed', jobId, error);
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'failed', error: error.message } });

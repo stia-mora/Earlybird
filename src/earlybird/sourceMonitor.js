@@ -60,6 +60,11 @@ function sourceErrorMessage(error) {
   return String(error?.message || error).slice(0, 500);
 }
 
+async function recordPoll(prisma, data) {
+  if (!prisma.earlyBirdPoll?.create) return;
+  await prisma.earlyBirdPoll.create({ data });
+}
+
 export function createSourceMonitor({ prisma, queue, scraperFactory, now = () => new Date(), logger = console, pollTimeoutMs = Number(process.env.EARLYBIRD_SOURCE_POLL_TIMEOUT_MS || 30000) } = {}) {
   if (!prisma) throw new Error('source monitor requires prisma');
   return {
@@ -83,6 +88,7 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
           const newest = ordered.at(-1);
           if (!newest) {
             await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { baselineComplete: true, lastPolledAt: now(), lastError: null } });
+            await recordPoll(prisma, { sourceId: source.id, outcome: 'baseline', detectedCount: 0, polledAt: now() });
             return { baseline: true, detected: 0 };
           }
           await prisma.earlyBirdSource.update({ where: { id: source.id }, data: {
@@ -91,10 +97,12 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
             lastSeenPostId: newest?.id || null,
             lastPolledAt: now(), lastError: null,
           } });
+          await recordPoll(prisma, { sourceId: source.id, outcome: 'baseline', detectedCount: 0, polledAt: now() });
           return { baseline: true, detected: 0 };
         }
         const fresh = ordered.filter(post => isNewer(post, source));
         let detected = 0;
+        const postIds = [];
         for (const post of fresh) {
           const record = await prisma.earlyBirdPost.upsert({
             where: { sourceId_postId: { sourceId: source.id, postId: String(post.id) } },
@@ -104,15 +112,18 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
           const job = await prisma.earlyBirdArticleJob.upsert({ where: { postId: record.id }, update: {}, create: { sourceId: source.id, postId: record.id, status: 'detected' } });
           if (queue) await queue.add('process', { jobId: job.id }, { jobId: `earlybird-article-${job.id}`, removeOnComplete: 100, removeOnFail: 100 });
           detected += 1;
+          postIds.push(String(post.id));
         }
         const newest = ordered.at(-1);
         if (newest && (isNewer(newest, source))) await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastSeenCreatedAt: newest.createdAt ? new Date(newest.createdAt) : null, lastSeenPostId: newest.id, lastPolledAt: now(), lastError: null } });
         else await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastPolledAt: now(), lastError: null } });
+        await recordPoll(prisma, { sourceId: source.id, outcome: detected ? 'detected' : 'no_new', detectedCount: detected, postIds: postIds.length ? postIds : undefined, polledAt: now() });
         return { baseline: false, detected };
       } catch (error) {
         const message = sourceErrorMessage(error);
         logger.error?.('EarlyBird source poll failed', source.handle, message);
         await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastPolledAt: now(), lastError: message } });
+        await recordPoll(prisma, { sourceId: source.id, outcome: 'failed', detectedCount: 0, error: message, polledAt: now() });
         throw error;
       }
     },
