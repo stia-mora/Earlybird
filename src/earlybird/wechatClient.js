@@ -34,5 +34,6 @@ export function createWeChatClient({ appId = process.env.WECHAT_APP_ID, appSecre
     uploadPermanentMaterial(filePath, type = 'thumb', options = {}) { return upload('/cgi-bin/material/add_material', filePath, { type, ...(options.description ? { description: JSON.stringify(options.description) } : {}) }); },
     addDraft(article) { return jsonRequest('/cgi-bin/draft/add', { articles: [{ article_type: 'news', need_open_comment: 0, only_fans_can_comment: 0, ...article }] }); },
     getDraft(mediaId) { return jsonRequest('/cgi-bin/draft/get', { media_id: mediaId }); },
+    deleteDraft(mediaId) { return jsonRequest('/cgi-bin/draft/delete', { media_id: mediaId }); },
   };
 }

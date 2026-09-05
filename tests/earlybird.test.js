@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createSourceMonitor } from '../src/earlybird/sourceMonitor.js';
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
-import { scoreHumanized } from '../src/earlybird/humanizer.js';
+import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
 import { createWeChatClient } from '../src/earlybird/wechatClient.js';
 import { DEFAULT_SOURCES } from '../src/earlybird/utils.js';
@@ -83,6 +83,11 @@ describe('thread assembly and humanizer', () => {
   it('penalizes common AI traces', () => {
     expect(scoreHumanized('值得注意的是，在当今生态中不仅如此而且如此。')).toBeLessThan(45);
   });
+  it('does not let humanization collapse an event story into a summary', async () => {
+    const markdown = `## 时间线\n\n${'官方消息提供了可核查的时间线与发布范围。'.repeat(70)}`;
+    const result = await humanize({ client: { complete: async () => ({ markdown: '一句摘要。', score: 50 }) }, markdown, context: { editorial: { contentType: 'event' } } });
+    expect(result.markdown).toBe(markdown);
+  });
 });
 
 describe('Graphite renderer', () => {
@@ -115,6 +120,14 @@ describe('editorial triage', () => {
     expect(allowed.contentType).toBe('brief');
     expect(bankedReset.contentType).toBe('brief');
     expect(denied.contentType).toBe('ignore');
+  });
+
+  it('recognizes Tibo by the actual post author when a source uses an internal alias', () => {
+    const decision = normalizeEditorialDecision(
+      { publish: true, contentType: 'brief', newsworthiness: 90, reason: '配额补偿' },
+      { post: { ...tiboPost, text: 'A banked reset lands today.' }, source: { ...source, handle: 'ebtibo' } },
+    );
+    expect(decision).toMatchObject({ contentType: 'brief', publish: true });
   });
 
   it('never turns replies or comments into an article', () => {
@@ -182,8 +195,9 @@ describe('event story pipeline', () => {
     const collect = vi.fn(async ({ post: target }) => []);
     const llmClient = { complete: vi.fn(async ({ system }) => {
       if (system.includes('微信公众号总编辑')) return { publish: true, contentType: 'event', newsworthiness: 90, relatedPostIds: ['p2'], reason: '同一发布事件', searchQueries: [] };
-      if (system.includes('Humanizer-zh')) return { markdown: '## 一条线索\n\n两条官方动态构成同一事件。', score: 48 };
-      return { title: '合并后的官方动态', digest: '两条官方动态构成同一事件。', markdown: '## 一条线索\n\n两条官方动态构成同一事件。' };
+      const markdown = `## 一条线索\n\n${'两条官方动态构成同一事件，并提供了明确的发布范围。'.repeat(45)}`;
+      if (system.includes('Humanizer-zh')) return { markdown, score: 48 };
+      return { title: '合并后的官方动态', digest: '两条官方动态构成同一事件。', markdown };
     }) };
     const pipeline = createArticlePipeline({
       prisma,
@@ -222,7 +236,9 @@ describe('WeChat client', () => {
     await client.accessToken();
     await client.addDraft({ title: '标题', content: '<p>内容</p>', thumb_media_id: 'thumb' });
     await client.getDraft('m1');
+    await client.deleteDraft('m1');
     expect(fetchImpl.mock.calls.filter(([url]) => url.includes('/cgi-bin/token'))).toHaveLength(1);
     expect(calls.some(call => call.url.includes('/draft/add'))).toBe(true);
+    expect(calls.some(call => call.url.includes('/draft/delete'))).toBe(true);
   });
 });

@@ -30,7 +30,9 @@ export function recentPostSummary(post) {
 }
 
 export function normalizeEditorialDecision(decision, { post, source, thread = [], recentPosts = [] } = {}) {
-  const handle = String(source?.handle || post?.authorUsername || '').toLowerCase();
+  const sourceHandle = String(source?.handle || '').toLowerCase();
+  const authorHandle = String(post?.authorUsername || '').toLowerCase();
+  const isTibo = sourceHandle === TIBO_HANDLE || authorHandle === TIBO_HANDLE;
   const candidateIds = new Set(recentPosts.map(item => item.id));
   const type = CONTENT_TYPES.has(decision?.contentType) ? decision.contentType : 'ignore';
   const score = Number(decision?.newsworthiness || 0);
@@ -40,7 +42,7 @@ export function normalizeEditorialDecision(decision, { post, source, thread = []
 
   if (isConversationPost(post)) return { contentType: 'ignore', publish: false, reason: '回复、评论或对话内容不自动成文。', newsworthiness: score, relatedPostIds: [], searchQueries: [] };
   if (!publish || type === 'ignore') return { contentType: 'ignore', publish: false, reason: shortText(decision?.reason || '信息密度或独立新闻价值不足。', 300), newsworthiness: score, relatedPostIds: [], searchQueries: [] };
-  if (handle === TIBO_HANDLE) {
+  if (isTibo) {
     if (!isTiboBriefEligible(post, thread)) return { contentType: 'ignore', publish: false, reason: 'Tibo 暂时只收录 Codex 重置或 Codex 适配 ChatGPT 新模型消息。', newsworthiness: score, relatedPostIds: [], searchQueries: [] };
     return { contentType: 'brief', publish: true, reason: shortText(decision?.reason, 300), newsworthiness: score, eventKey: null, relatedPostIds: [], searchQueries: [] };
   }
