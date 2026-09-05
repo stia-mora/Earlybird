@@ -23,6 +23,22 @@ async function expandTweetCard(card) {
   });
 }
 
+async function hideOverlappingPageChrome(card) {
+  await card.evaluate(element => {
+    const cardBox = element.getBoundingClientRect();
+    for (const candidate of document.body.querySelectorAll('*')) {
+      if (candidate.contains(element) || element.contains(candidate)) continue;
+      const style = window.getComputedStyle(candidate);
+      if (!['fixed', 'sticky'].includes(style.position)) continue;
+      const box = candidate.getBoundingClientRect();
+      const overlaps = box.width > 0 && box.height > 0
+        && box.left < cardBox.right && box.right > cardBox.left
+        && box.top < cardBox.bottom && box.bottom > cardBox.top;
+      if (overlaps) candidate.style.setProperty('visibility', 'hidden', 'important');
+    }
+  });
+}
+
 async function addInlineTranslation(card, translation) {
   if (!translation?.trim()) return;
   await card.evaluate((element, value) => {
@@ -137,6 +153,7 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', show
     assertTweetEvidence({ pageText, articleText });
     await expandTweetCard(shot);
     if (showTranslation) await addInlineTranslation(shot, translation);
+    await hideOverlappingPageChrome(shot);
     if (!mediaPosterPath) await waitForTweetVideoFrame(shot);
     const [cardBox, video] = await Promise.all([
       shot.boundingBox(),
