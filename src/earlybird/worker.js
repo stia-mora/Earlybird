@@ -7,7 +7,7 @@ const redisUrl = process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || '
 const prisma = new PrismaClient();
 const queue = new Bull('earlybird-articles', redisUrl);
 const monitorQueue = new Bull('earlybird-source-monitor', redisUrl, {
-  limiter: { max: 1, duration: Number(process.env.EARLYBIRD_SOURCE_MIN_REQUEST_INTERVAL_MS || 20000) },
+  limiter: { max: 1, duration: Number(process.env.EARLYBIRD_SOURCE_MIN_REQUEST_INTERVAL_MS || 5000) },
 });
 const pipeline = createArticlePipeline({ prisma, scraperFactory: defaultScraperFactory });
 const monitor = createSourceMonitor({ prisma, queue, scraperFactory: defaultScraperFactory });
