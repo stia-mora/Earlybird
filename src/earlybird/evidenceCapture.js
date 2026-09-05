@@ -25,15 +25,26 @@ async function expandTweetCard(card) {
 
 async function addInlineTranslation(card, translation) {
   if (!translation?.trim()) return;
-  await card.evaluate(value => {
-    const text = document.querySelector('[data-testid="tweetText"]');
-    if (!text || document.querySelector('[data-earlybird-translation="true"]')) return;
+  await card.evaluate((element, value) => {
+    const text = element.querySelector('[data-testid="tweetText"]');
+    if (!text || element.querySelector('[data-earlybird-translation="true"]')) return;
     const block = document.createElement('div');
     block.dataset.earlybirdTranslation = 'true';
     block.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid rgb(207,217,222);font-size:15px;line-height:1.45;color:rgb(15,20,25);white-space:pre-wrap;';
     block.textContent = value;
     text.insertAdjacentElement('afterend', block);
   }, translation.trim());
+}
+
+async function findTweetCard(page, postId) {
+  const cards = await page.$$('article[data-testid="tweet"]');
+  for (const card of cards) {
+    const statusLink = await card.$(`a[href*="/status/${postId}"]`);
+    if (!statusLink) continue;
+    await statusLink.dispose().catch(() => {});
+    return card;
+  }
+  return null;
 }
 
 export async function captureEvidence({ tweetUrl, postId, translation = '', showTranslation = true, outputPath, browser, launchOptions = {}, thread = [] } = {}) {
@@ -55,22 +66,17 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', show
     await page.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
     const cookies = xBrowserCookies();
     if (cookies.length) await page.setCookie(...cookies);
-    await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    const match = new URL(tweetUrl).pathname.match(/^\/([^/]+)\/status\/\d+/);
+    const profileUrl = match ? `https://x.com/${match[1]}` : tweetUrl;
+    await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     const initialPageText = await page.evaluate(() => document.body?.innerText || '');
     assertTweetEvidence({ pageText: initialPageText, articleText: 'pending' });
     await page.waitForSelector('article[data-testid="tweet"]', { timeout: 30000 });
-    const cards = await page.$$('article[data-testid="tweet"]');
-    let shot = cards[0];
-    if (postId) {
-      shot = null;
-      for (const card of cards) {
-        const statusLink = await card.$(`a[href*="/status/${postId}"]`);
-        if (statusLink) {
-          await statusLink.dispose().catch(() => {});
-          shot = card;
-          break;
-        }
-      }
+    let shot = postId ? await findTweetCard(page, postId) : (await page.$$('article[data-testid="tweet"]'))[0];
+    if (!shot && profileUrl !== tweetUrl) {
+      await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForSelector('article[data-testid="tweet"]', { timeout: 30000 });
+      shot = postId ? await findTweetCard(page, postId) : (await page.$$('article[data-testid="tweet"]'))[0];
     }
     if (!shot) throw new Error('X post card was not found; evidence screenshot was not created');
     const [pageText, articleText] = await Promise.all([
