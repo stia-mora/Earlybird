@@ -101,6 +101,7 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
   const lines = sanitizeEditorialMarkdown(markdown).split('\n');
   const safeTitle = sanitizeEditorialMarkdown(title).replace(/\s*\n\s*/g, ' ');
   const safeDigest = sanitizeEditorialMarkdown(digest).replace(/\s*\n\s*/g, ' ');
+  const displayDigest = normalizedTitle(safeDigest) === normalizedTitle(safeTitle) ? '' : safeDigest;
   const sections = [];
   let current = null;
   let inCode = false;
@@ -128,7 +129,7 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
   }
   let html = `<section style="${GRAPHITE}">`;
   if (safeTitle) html += `<h1 style="font-size:24px;line-height:1.4;color:#27272A;margin:24px 10px 12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(safeTitle))}</span></h1>`;
-  if (safeDigest) html += `<p style="font-size:16px;color:#3F3F46;margin:0 10px 24px;border-left:3px solid #52525B;padding-left:12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(safeDigest))}</span></p>`;
+  if (displayDigest) html += `<p style="font-size:16px;color:#3F3F46;margin:0 10px 24px;border-left:3px solid #52525B;padding-left:12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(displayDigest))}</span></p>`;
   let headingNumber = 0;
   let highlightBudget = contentType === 'brief' ? 2 : 5;
   sections.forEach((section, index) => {

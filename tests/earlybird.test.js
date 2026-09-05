@@ -274,7 +274,7 @@ describe('Graphite renderer', () => {
   });
 
   it('does not repeat the article title as the first body line', async () => {
-    const html = await renderGzhMarkdown('OpenAI 发布新模型\n\n正文从一条可核查的事实开始。', { title: 'OpenAI 发布新模型' });
+    const html = await renderGzhMarkdown('OpenAI 发布新模型\n\n正文从一条可核查的事实开始。', { title: 'OpenAI 发布新模型', digest: 'OpenAI 发布新模型' });
     expect(html.match(/OpenAI 发布新模型/g)).toHaveLength(1);
   });
   it('blocks HTML that has validator warnings before a draft can be created', async () => {
