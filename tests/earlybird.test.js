@@ -12,7 +12,7 @@ import { classifyEditorial, normalizeEditorialDecision } from '../src/earlybird/
 import { isOfficialUrl, normalizeSearchQueries, officialHosts } from '../src/earlybird/researchBrowser.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline } from '../src/earlybird/pipeline.js';
-import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH } from '../src/earlybird/articleWriter.js';
+import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH, sanitizeEditorialMarkdown } from '../src/earlybird/articleWriter.js';
 import { enqueueInterruptedJobs } from '../src/earlybird/jobRecovery.js';
 import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
@@ -252,6 +252,13 @@ describe('thread assembly and humanizer', () => {
     expect(hasCompactPresentation(compact)).toBe(true);
     expect(compact.split('\n').every(line => !line.trim() || /^[-#]/.test(line) || line.length <= MAX_PARAGRAPH_LENGTH)).toBe(true);
   });
+
+  it('removes collection metrics and rounds timestamps down to minutes', () => {
+    const cleaned = sanitizeEditorialMarkdown('原始数据记录为 1，192 次点赞、19，212 次浏览。\n\n截图 OCR 中还可见 45。3 万查看等互动项。\n\nOpenAI 于 2026 年 9 月 4 日 20：13：05 发布更新。');
+    expect(cleaned).not.toMatch(/原始数据|OCR|点赞|浏览|查看|互动项/);
+    expect(cleaned).toContain('20：13');
+    expect(cleaned).not.toContain('20：13：05');
+  });
   it('merges adjacent fragments into a complete reading paragraph', () => {
     const compact = compactEditorialMarkdown('第一句话只交代了背景。\n\n第二句话补足了读者理解这件事所需的关键事实。');
     expect(compact).toBe('第一句话只交代了背景。第二句话补足了读者理解这件事所需的关键事实。');
@@ -264,6 +271,11 @@ describe('Graphite renderer', () => {
     expect(html.startsWith('<section')).toBe(true);
     expect(html).not.toMatch(/<div|<style|<script|position:\s*(absolute|fixed|sticky)/i);
     expect(html).toContain('leaf=');
+  });
+
+  it('does not repeat the article title as the first body line', async () => {
+    const html = await renderGzhMarkdown('OpenAI 发布新模型\n\n正文从一条可核查的事实开始。', { title: 'OpenAI 发布新模型' });
+    expect(html.match(/OpenAI 发布新模型/g)).toHaveLength(1);
   });
   it('blocks HTML that has validator warnings before a draft can be created', async () => {
     await expect(validateGzhHtml('<section><p>中文,半角标点</p></section>', { run: async () => 'WARNING ×1' })).rejects.toThrow('gzh HTML validation failed');

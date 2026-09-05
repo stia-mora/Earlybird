@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { escapeHtml, fullWidthPunctuation } from './utils.js';
-import { compactEditorialMarkdown, MAX_PARAGRAPH_LENGTH } from './articleWriter.js';
+import { MAX_PARAGRAPH_LENGTH, sanitizeEditorialMarkdown } from './articleWriter.js';
 
 const execFileAsync = promisify(execFile);
 const validatorPath = fileURLToPath(new URL('../../scripts/validate_gzh_html.py', import.meta.url));
@@ -92,23 +92,39 @@ function referenceUrls(references) {
   return [...urls].slice(0, 8);
 }
 
+function normalizedTitle(value) {
+  return plainText(value).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
+}
+
 export async function renderGzhMarkdown(markdown, { title, digest, contentType, references = [] } = {}) {
   await loadGzhSources();
-  const lines = compactEditorialMarkdown(markdown).split('\n');
-  const safeTitle = compactEditorialMarkdown(title).replace(/\s*\n\s*/g, ' ');
-  const safeDigest = compactEditorialMarkdown(digest).replace(/\s*\n\s*/g, ' ');
+  const lines = sanitizeEditorialMarkdown(markdown).split('\n');
+  const safeTitle = sanitizeEditorialMarkdown(title).replace(/\s*\n\s*/g, ' ');
+  const safeDigest = sanitizeEditorialMarkdown(digest).replace(/\s*\n\s*/g, ' ');
   const sections = [];
   let current = null;
   let inCode = false;
   let code = [];
+  let firstContentSeen = false;
   for (const raw of lines) {
     const line = raw.trimEnd();
     if (line.startsWith('```')) { if (inCode) { sections.push(`<section style="margin:20px 10px;padding:14px;background:#27272A;color:#FFFFFF;overflow-x:auto;"><p style="font-size:13px;line-height:1.6;margin:0;"><span leaf="">${escapeHtml(code.join('\n'))}</span></p></section>`); code = []; } inCode = !inCode; continue; }
     if (inCode) { code.push(line); continue; }
     const heading = line.match(/^#{2,3}\s+(.+)/);
-    if (heading) { current = { title: heading[1], body: [] }; sections.push(current); continue; }
+    if (heading) {
+      if (!firstContentSeen && normalizedTitle(heading[1]) === normalizedTitle(safeTitle)) { firstContentSeen = true; continue; }
+      firstContentSeen = true;
+      current = { title: heading[1], body: [] };
+      sections.push(current);
+      continue;
+    }
     if (line.startsWith('# ')) continue;
-    if (line.trim()) { if (!current) { current = { title: null, body: [] }; sections.push(current); } current.body.push(line); }
+    if (line.trim()) {
+      if (!firstContentSeen && normalizedTitle(line) === normalizedTitle(safeTitle)) { firstContentSeen = true; continue; }
+      firstContentSeen = true;
+      if (!current) { current = { title: null, body: [] }; sections.push(current); }
+      current.body.push(line);
+    }
   }
   let html = `<section style="${GRAPHITE}">`;
   if (safeTitle) html += `<h1 style="font-size:24px;line-height:1.4;color:#27272A;margin:24px 10px 12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(safeTitle))}</span></h1>`;
@@ -121,7 +137,7 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
     for (const item of section.body) {
       const image = item.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       if (image) {
-        html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(compactEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' '))}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
+        html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(sanitizeEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' '))}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
         continue;
       }
       if (/^[-*]\s+/.test(item)) {
