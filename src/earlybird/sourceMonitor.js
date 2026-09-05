@@ -27,6 +27,17 @@ export function cacheScraperFactory(factory) {
   };
 }
 
+export function retryAtFromRateLimit(error, now = Date.now()) {
+  const resetAt = Number(error?.resetAt);
+  return error?.name === 'RateLimitError' && Number.isFinite(resetAt) && resetAt > now ? resetAt : null;
+}
+
+function sourceErrorMessage(error) {
+  const retryAt = retryAtFromRateLimit(error);
+  if (retryAt) return `X rate limited until ${new Date(retryAt).toISOString()}`;
+  return String(error?.message || error).slice(0, 500);
+}
+
 export function createSourceMonitor({ prisma, queue, scraperFactory, now = () => new Date(), logger = console, pollTimeoutMs = Number(process.env.EARLYBIRD_SOURCE_POLL_TIMEOUT_MS || 30000) } = {}) {
   if (!prisma) throw new Error('source monitor requires prisma');
   return {
@@ -77,8 +88,9 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
         else await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastPolledAt: now(), lastError: null } });
         return { baseline: false, detected };
       } catch (error) {
-        logger.error?.('EarlyBird source poll failed', source.handle, error);
-        await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastPolledAt: now(), lastError: error.message } });
+        const message = sourceErrorMessage(error);
+        logger.error?.('EarlyBird source poll failed', source.handle, message);
+        await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastPolledAt: now(), lastError: message } });
         throw error;
       }
     },

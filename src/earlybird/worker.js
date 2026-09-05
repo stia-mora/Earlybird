@@ -1,7 +1,7 @@
 import Bull from 'bull';
 import { PrismaClient } from '@prisma/client';
 import { createArticlePipeline } from './pipeline.js';
-import { cacheScraperFactory, createSourceMonitor, defaultScraperFactory } from './sourceMonitor.js';
+import { cacheScraperFactory, createSourceMonitor, defaultScraperFactory, retryAtFromRateLimit } from './sourceMonitor.js';
 
 const redisUrl = process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`;
 const prisma = new PrismaClient();
@@ -40,17 +40,27 @@ async function enqueueSourcePoll(source, delay = 0) {
 async function pollSourceWithRetry(sourceId) {
   try {
     return await monitor.pollSource(sourceId);
-  } catch {
+  } catch (error) {
+    const retryAt = retryAtFromRateLimit(error);
+    if (retryAt) return { rateLimitedUntil: retryAt };
     await sleep(sourceRetryDelayMs);
-    return monitor.pollSource(sourceId);
+    try {
+      return await monitor.pollSource(sourceId);
+    } catch (retryError) {
+      const retryAt = retryAtFromRateLimit(retryError);
+      if (retryAt) return { rateLimitedUntil: retryAt };
+      throw retryError;
+    }
   }
 }
 
-async function scheduleNextSourcePoll(sourceId, startedAt) {
+async function scheduleNextSourcePoll(sourceId, startedAt, rateLimitedUntil = null) {
   const source = await prisma.earlyBirdSource.findUnique({ where: { id: sourceId } });
   if (!source?.enabled) return;
   const every = Math.max(15000, source.pollIntervalSeconds * 1000);
-  await enqueueSourcePoll(source, Math.max(0, every - (Date.now() - startedAt)));
+  const regularDelay = Math.max(0, every - (Date.now() - startedAt));
+  const rateLimitDelay = rateLimitedUntil ? Math.max(0, rateLimitedUntil - Date.now()) : 0;
+  await enqueueSourcePoll(source, Math.max(regularDelay, rateLimitDelay));
 }
 
 await monitor.ensureDefaults();
@@ -70,10 +80,12 @@ queue.process('process', Number(process.env.EARLYBIRD_CONCURRENCY || 1), async j
 monitorQueue.process('poll', Number(process.env.EARLYBIRD_SOURCE_CONCURRENCY || 2), async job => {
   await waitForSourceRequestSlot();
   const startedAt = Date.now();
+  let result;
   try {
-    return await pollSourceWithRetry(job.data.sourceId);
+    result = await pollSourceWithRetry(job.data.sourceId);
+    return result;
   } finally {
-    await scheduleNextSourcePoll(job.data.sourceId, startedAt);
+    await scheduleNextSourcePoll(job.data.sourceId, startedAt, result?.rateLimitedUntil);
   }
 });
 

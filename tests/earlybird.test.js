@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
-import { cacheScraperFactory, createSourceMonitor } from '../src/earlybird/sourceMonitor.js';
+import { cacheScraperFactory, createSourceMonitor, retryAtFromRateLimit } from '../src/earlybird/sourceMonitor.js';
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
@@ -39,6 +39,12 @@ describe('EarlyBird source monitor', () => {
     await Promise.all([cached({ handle: 'openai' }), cached({ handle: 'anthropicai' })]);
 
     expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for X rate-limit reset instead of immediately retrying', () => {
+    expect(retryAtFromRateLimit({ name: 'RateLimitError', resetAt: 2_000 }, 1_000)).toBe(2_000);
+    expect(retryAtFromRateLimit({ name: 'RateLimitError', resetAt: 1_000 }, 1_000)).toBeNull();
+    expect(retryAtFromRateLimit({ name: 'AuthError', resetAt: 2_000 }, 1_000)).toBeNull();
   });
 
   it('seeds the configured AI sources with their official websites', async () => {
