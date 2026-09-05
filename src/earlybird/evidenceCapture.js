@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import puppeteer from 'puppeteer';
 import { parseCookieString } from '../scrapers/twitter/http/auth.js';
@@ -36,27 +36,10 @@ async function addInlineTranslation(card, translation) {
   }, translation.trim());
 }
 
-async function ensureTweetVideoFrame(card, mediaPosterPath) {
+async function waitForTweetVideoFrame(card) {
   const hasVideo = await card.$('[data-testid="videoPlayer"]');
   if (!hasVideo) return;
   await hasVideo.dispose().catch(() => {});
-  if (mediaPosterPath) {
-    const dataUrl = `data:image/jpeg;base64,${(await readFile(mediaPosterPath)).toString('base64')}`;
-    await card.evaluate((element, source) => {
-      const player = element.querySelector('[data-testid="videoPlayer"]');
-      if (!player) return;
-      player.style.position = 'relative';
-      player.style.overflow = 'hidden';
-      player.querySelector('[data-earlybird-video-frame="true"]')?.remove();
-      const image = document.createElement('img');
-      image.dataset.earlybirdVideoFrame = 'true';
-      image.src = source;
-      image.alt = 'X 视频首帧';
-      image.style.cssText = 'position:absolute;inset:0;z-index:2147483647;display:block;width:100%;height:100%;object-fit:cover;background:#000;';
-      player.append(image);
-    }, dataUrl);
-    return;
-  }
   const ready = await card.evaluate(async element => {
     element.scrollIntoView({ block: 'center' });
     const video = element.querySelector('[data-testid="videoPlayer"] video');
@@ -71,6 +54,37 @@ async function ensureTweetVideoFrame(card, mediaPosterPath) {
   });
   if (ready) return;
   if (!ready) throw new Error('X post video did not render a preview frame; evidence screenshot was not created');
+}
+
+async function compositeVideoFrame({ browser, raw, cardBox, videoBox, mediaPosterPath, outputPath }) {
+  if (!mediaPosterPath || !videoBox) {
+    await writeFile(outputPath, raw);
+    return;
+  }
+
+  const width = Math.ceil(cardBox.width);
+  const height = Math.ceil(cardBox.height);
+  const left = Math.max(0, Math.round(videoBox.x - cardBox.x));
+  const top = Math.max(0, Math.round(videoBox.y - cardBox.y));
+  const videoWidth = Math.min(width - left, Math.ceil(videoBox.width));
+  const videoHeight = Math.min(height - top, Math.ceil(videoBox.height));
+  if (videoWidth <= 0 || videoHeight <= 0) {
+    await writeFile(outputPath, raw);
+    return;
+  }
+
+  const [rawData, frameData] = await Promise.all([
+    Promise.resolve(raw.toString('base64')),
+    readFile(mediaPosterPath).then(file => file.toString('base64')),
+  ]);
+  const composite = await browser.newPage();
+  try {
+    await composite.setViewport({ width, height, deviceScaleFactor: 1 });
+    await composite.setContent(`<!doctype html><html><body style="margin:0;overflow:hidden;background:#fff"><img alt="X post evidence" src="data:image/png;base64,${rawData}" style="display:block;width:${width}px;height:${height}px"><img alt="X video frame" src="data:image/jpeg;base64,${frameData}" style="position:absolute;left:${left}px;top:${top}px;width:${videoWidth}px;height:${videoHeight}px;object-fit:cover"></body></html>`);
+    await composite.screenshot({ path: outputPath, type: 'png' });
+  } finally {
+    await composite.close().catch(() => {});
+  }
 }
 
 async function findTweetCard(page, postId) {
@@ -122,9 +136,24 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', show
     ]);
     assertTweetEvidence({ pageText, articleText });
     await expandTweetCard(shot);
-    await ensureTweetVideoFrame(shot, mediaPosterPath);
     if (showTranslation) await addInlineTranslation(shot, translation);
-    const raw = await shot.screenshot({ path: outputPath, type: 'png' });
+    if (!mediaPosterPath) await waitForTweetVideoFrame(shot);
+    const [cardBox, video] = await Promise.all([
+      shot.boundingBox(),
+      shot.$('[data-testid="videoPlayer"]'),
+    ]);
+    if (!cardBox) throw new Error('X post card could not be measured; evidence screenshot was not created');
+    const videoBox = video ? await video.boundingBox() : null;
+    await video?.dispose().catch(() => {});
+    const raw = await shot.screenshot({ type: 'png' });
+    await compositeVideoFrame({
+      browser: ownBrowser,
+      raw,
+      cardBox,
+      videoBox,
+      mediaPosterPath,
+      outputPath,
+    });
     return { path: resolve(outputPath), bytes: (await readFile(outputPath)).length, rawBytes: raw.length };
   } finally {
     await page.close().catch(() => {});

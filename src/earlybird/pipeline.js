@@ -59,7 +59,8 @@ function articleReferences(storyPosts, research) {
 }
 
 function videoPosterPath(assets) {
-  return assets.find(asset => asset.kind === 'video' && asset.metadata?.posterPath)?.metadata.posterPath;
+  const video = assets.find(asset => asset.kind === 'video');
+  return video?.metadata?.keyframes?.find(Boolean) || video?.metadata?.posterPath;
 }
 
 export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, logger = console } = {}) {
