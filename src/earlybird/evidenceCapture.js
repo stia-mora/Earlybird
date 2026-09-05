@@ -36,7 +36,7 @@ async function addInlineTranslation(card, translation) {
   }, translation.trim());
 }
 
-async function waitForTweetMedia(card) {
+async function ensureTweetVideoFrame(card, mediaPosterPath) {
   const hasVideo = await card.$('[data-testid="videoPlayer"]');
   if (!hasVideo) return;
   await hasVideo.dispose().catch(() => {});
@@ -44,15 +44,26 @@ async function waitForTweetMedia(card) {
     element.scrollIntoView({ block: 'center' });
     const video = element.querySelector('[data-testid="videoPlayer"] video');
     if (!video) return false;
-    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA || video.poster) return true;
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return true;
     await Promise.race([
       new Promise(resolve => video.addEventListener('loadeddata', () => resolve(true), { once: true })),
       new Promise(resolve => video.addEventListener('canplay', () => resolve(true), { once: true })),
       new Promise(resolve => setTimeout(resolve, 12000)),
     ]);
-    return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA || Boolean(video.poster);
+    return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
   });
-  if (!ready) throw new Error('X post video did not render a preview frame; evidence screenshot was not created');
+  if (ready) return;
+  if (!mediaPosterPath) throw new Error('X post video did not render a preview frame; evidence screenshot was not created');
+  const dataUrl = `data:image/jpeg;base64,${(await readFile(mediaPosterPath)).toString('base64')}`;
+  await card.evaluate((element, source) => {
+    const player = element.querySelector('[data-testid="videoPlayer"]');
+    if (!player) return;
+    const image = document.createElement('img');
+    image.src = source;
+    image.alt = 'X 视频首帧';
+    image.style.cssText = 'display:block;width:100%;height:100%;object-fit:cover;background:#000;';
+    player.replaceChildren(image);
+  }, dataUrl);
 }
 
 async function findTweetCard(page, postId) {
@@ -66,7 +77,7 @@ async function findTweetCard(page, postId) {
   return null;
 }
 
-export async function captureEvidence({ tweetUrl, postId, translation = '', showTranslation = true, outputPath, browser, launchOptions = {}, thread = [] } = {}) {
+export async function captureEvidence({ tweetUrl, postId, translation = '', showTranslation = true, mediaPosterPath, outputPath, browser, launchOptions = {}, thread = [] } = {}) {
   if (!tweetUrl || !outputPath) throw new Error('tweetUrl and outputPath are required');
   if (postId && !/^\d+$/.test(String(postId))) throw new Error('postId must be a numeric X status ID');
   await mkdir(dirname(outputPath), { recursive: true });
@@ -104,7 +115,7 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', show
     ]);
     assertTweetEvidence({ pageText, articleText });
     await expandTweetCard(shot);
-    await waitForTweetMedia(shot);
+    await ensureTweetVideoFrame(shot, mediaPosterPath);
     if (showTranslation) await addInlineTranslation(shot, translation);
     const raw = await shot.screenshot({ path: outputPath, type: 'png' });
     return { path: resolve(outputPath), bytes: (await readFile(outputPath)).length, rawBytes: raw.length };

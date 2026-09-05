@@ -58,6 +58,10 @@ function articleReferences(storyPosts, research) {
   ].filter(Boolean))];
 }
 
+function videoPosterPath(assets) {
+  return assets.find(asset => asset.kind === 'video' && asset.metadata?.posterPath)?.metadata.posterPath;
+}
+
 export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, logger = console } = {}) {
   const writer = createArticleWriter({ client: llmClient });
   return {
@@ -113,10 +117,11 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
           const relatedThread = Array.isArray(relatedPost.threadData) && relatedPost.threadData.length
             ? relatedPost.threadData
             : [relatedPost.rawData];
-          relatedAssets.push(...await collectAssets({ prisma, mediaPipeline, post: relatedPost, thread: relatedThread }));
+          const collectedRelatedAssets = await collectAssets({ prisma, mediaPipeline, post: relatedPost, thread: relatedThread });
+          relatedAssets.push(...collectedRelatedAssets);
           const relatedEvidencePath = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', `${relatedPost.postId}-evidence.png`);
           try {
-            await evidence({ tweetUrl: relatedPost.sourceUrl, postId: relatedPost.postId, translation: '', showTranslation: false, outputPath: relatedEvidencePath, thread: relatedThread });
+            await evidence({ tweetUrl: relatedPost.sourceUrl, postId: relatedPost.postId, translation: '', showTranslation: false, mediaPosterPath: videoPosterPath(collectedRelatedAssets), outputPath: relatedEvidencePath, thread: relatedThread });
             relatedEvidenceAssets.push(postEvidenceAsset(relatedPost, relatedEvidencePath));
           } catch (error) {
             logger.warn?.('EarlyBird related X evidence was unavailable', relatedPost.postId, error.message);
@@ -128,12 +133,12 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
           : await researchOfficialSources({ queries: editorial.searchQueries, websites, logger });
         const researchAssets = await collectResearchImages({ research, post: job.post, prisma, logger });
         const allAssets = [...assets, ...relatedAssets, ...researchAssets];
-        await evidence({ tweetUrl: job.post.sourceUrl, postId: job.post.postId, translation: '', outputPath: evidencePath, thread });
+        await evidence({ tweetUrl: job.post.sourceUrl, postId: job.post.postId, translation: '', mediaPosterPath: videoPosterPath(assets), outputPath: evidencePath, thread });
         const analysisPost = { ...job.post.rawData, text: job.post.text, storyPosts: storyPosts.map(item => ({ author: item.authorUsername, createdAt: item.createdAt, url: item.sourceUrl, text: item.text })) };
         const analysis = await analyze({ client: llmClient, post: analysisPost, thread, assets: allAssets, evidencePath });
         const analysisMetadata = { ...editorialMetadata, analysis, research: { citations: research.citations, queries: research.queries } };
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'analyzed', metadata: analysisMetadata } });
-        await evidence({ tweetUrl: job.post.sourceUrl, postId: job.post.postId, translation: analysis.translation, outputPath: evidencePath, thread });
+        await evidence({ tweetUrl: job.post.sourceUrl, postId: job.post.postId, translation: analysis.translation, mediaPosterPath: videoPosterPath(assets), outputPath: evidencePath, thread });
         const articleAssets = [...allAssets, postEvidenceAsset(job.post, evidencePath), ...relatedEvidenceAssets];
         const references = articleReferences(storyPosts, research);
         const article = await writer.write({ post: job.post, thread, analysis, editorial, storyPosts, research: { ...research, assets: allAssets.filter(asset => asset.kind === 'image').map(asset => ({ path: asset.localPath, sourceUrl: asset.sourceUrl, altText: asset.metadata?.altText || '' })) }, assets: articleAssets, sourceUrl: job.post.sourceUrl });
