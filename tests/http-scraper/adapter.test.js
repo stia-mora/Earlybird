@@ -180,6 +180,25 @@ describe('createHttpScraper', () => {
     const scraper = await createHttpScraper();
     expect(typeof scraper.parseUserData).toBe('function');
   });
+
+  it('uses the configured fetch for cookie session validation', async () => {
+    const globalFetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('unexpected global fetch'));
+    const configuredFetch = vi.fn(async () => new Response('', { status: 404 }));
+
+    try {
+      await expect(createHttpScraper({
+        cookies: 'auth_token=test-token; ct0=test-csrf',
+        fetch: configuredFetch,
+      })).resolves.toHaveProperty('client');
+      expect(configuredFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/i/api/1.1/account/verify_credentials.json'),
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(globalFetch).not.toHaveBeenCalled();
+    } finally {
+      globalFetch.mockRestore();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

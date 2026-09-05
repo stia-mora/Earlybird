@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
-import { createSourceMonitor } from '../src/earlybird/sourceMonitor.js';
+import { cacheScraperFactory, createSourceMonitor } from '../src/earlybird/sourceMonitor.js';
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
@@ -31,6 +31,16 @@ function prismaFixture() {
 }
 
 describe('EarlyBird source monitor', () => {
+  it('reuses one authenticated scraper across source polls', async () => {
+    const scraper = { scrapeTweets: vi.fn() };
+    const factory = vi.fn(async () => scraper);
+    const cached = cacheScraperFactory(factory);
+
+    await Promise.all([cached({ handle: 'openai' }), cached({ handle: 'anthropicai' })]);
+
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
   it('seeds the configured AI sources with their official websites', async () => {
     const prisma = prismaFixture();
     const monitor = createSourceMonitor({ prisma, scraperFactory: vi.fn() });

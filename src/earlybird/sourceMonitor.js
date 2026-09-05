@@ -14,6 +14,19 @@ function isNewer(post, source) {
   return comparePosts(post, seen) > 0;
 }
 
+export function cacheScraperFactory(factory) {
+  let scraperPromise;
+  return async (source) => {
+    if (!scraperPromise) {
+      scraperPromise = Promise.resolve(factory(source)).catch((error) => {
+        scraperPromise = undefined;
+        throw error;
+      });
+    }
+    return scraperPromise;
+  };
+}
+
 export function createSourceMonitor({ prisma, queue, scraperFactory, now = () => new Date(), logger = console, pollTimeoutMs = Number(process.env.EARLYBIRD_SOURCE_POLL_TIMEOUT_MS || 30000) } = {}) {
   if (!prisma) throw new Error('source monitor requires prisma');
   return {
@@ -82,7 +95,8 @@ export async function defaultScraperFactory() {
   return createHttpScraper({
     cookies: process.env.X_COOKIES || process.env.TWITTER_COOKIES,
     proxy: process.env.EARLYBIRD_X_PROXY || undefined,
-    rateLimitStrategy: 'wait',
+    rateLimitStrategy: 'error',
+    maxRetries: Number(process.env.EARLYBIRD_X_MAX_RETRIES || 1),
     fetch: (url, options = {}) => fetch(url, {
       ...options,
       signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs),

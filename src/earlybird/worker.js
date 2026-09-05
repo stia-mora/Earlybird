@@ -1,7 +1,7 @@
 import Bull from 'bull';
 import { PrismaClient } from '@prisma/client';
 import { createArticlePipeline } from './pipeline.js';
-import { createSourceMonitor, defaultScraperFactory } from './sourceMonitor.js';
+import { cacheScraperFactory, createSourceMonitor, defaultScraperFactory } from './sourceMonitor.js';
 
 const redisUrl = process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`;
 const prisma = new PrismaClient();
@@ -11,7 +11,7 @@ const pipeline = createArticlePipeline({ prisma, scraperFactory: defaultScraperF
 const monitor = createSourceMonitor({
   prisma,
   queue,
-  scraperFactory: defaultScraperFactory,
+  scraperFactory: cacheScraperFactory(defaultScraperFactory),
   pollTimeoutMs: Number(process.env.EARLYBIRD_SOURCE_POLL_TIMEOUT_MS || 30000),
 });
 const sourceRequestIntervalMs = Number(process.env.EARLYBIRD_SOURCE_MIN_REQUEST_INTERVAL_MS || 5000);
