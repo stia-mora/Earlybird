@@ -36,6 +36,25 @@ async function addInlineTranslation(card, translation) {
   }, translation.trim());
 }
 
+async function waitForTweetMedia(card) {
+  const hasVideo = await card.$('[data-testid="videoPlayer"]');
+  if (!hasVideo) return;
+  await hasVideo.dispose().catch(() => {});
+  const ready = await card.evaluate(async element => {
+    element.scrollIntoView({ block: 'center' });
+    const video = element.querySelector('[data-testid="videoPlayer"] video');
+    if (!video) return false;
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA || video.poster) return true;
+    await Promise.race([
+      new Promise(resolve => video.addEventListener('loadeddata', () => resolve(true), { once: true })),
+      new Promise(resolve => video.addEventListener('canplay', () => resolve(true), { once: true })),
+      new Promise(resolve => setTimeout(resolve, 12000)),
+    ]);
+    return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA || Boolean(video.poster);
+  });
+  if (!ready) throw new Error('X post video did not render a preview frame; evidence screenshot was not created');
+}
+
 async function findTweetCard(page, postId) {
   const cards = await page.$$('article[data-testid="tweet"]');
   for (const card of cards) {
@@ -85,6 +104,7 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', show
     ]);
     assertTweetEvidence({ pageText, articleText });
     await expandTweetCard(shot);
+    await waitForTweetMedia(shot);
     if (showTranslation) await addInlineTranslation(shot, translation);
     const raw = await shot.screenshot({ path: outputPath, type: 'png' });
     return { path: resolve(outputPath), bytes: (await readFile(outputPath)).length, rawBytes: raw.length };
