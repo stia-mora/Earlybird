@@ -10,7 +10,7 @@ function extractJson(text) {
   }
 }
 
-export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY, baseUrl = process.env.EARLYBIRD_LLM_BASE_URL || 'https://api.openai.com/v1', model = process.env.EARLYBIRD_LLM_MODEL || 'gpt-4o-mini', fetchImpl = globalThis.fetch, timeoutMs = 90000, maxAttempts = 3, maxTokens = Number(process.env.EARLYBIRD_LLM_MAX_TOKENS || 4096) } = {}) {
+export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY, baseUrl = process.env.EARLYBIRD_LLM_BASE_URL || 'https://api.openai.com/v1', model = process.env.EARLYBIRD_LLM_MODEL || 'gpt-4o-mini', fetchImpl = globalThis.fetch, timeoutMs = 180000, maxAttempts = 3, maxTokens = Number(process.env.EARLYBIRD_LLM_MAX_TOKENS || 4096) } = {}) {
   return {
     async complete({ system, user, images = [], maxOutputTokens = maxTokens }) {
       if (!apiKey) throw new Error('EARLYBIRD_LLM_API_KEY is not configured');
