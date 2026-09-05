@@ -31,7 +31,7 @@ queue.process('process', Number(process.env.EARLYBIRD_CONCURRENCY || 1), async j
   }
   return result;
 });
-monitorQueue.process('poll', async job => monitor.pollSource(job.data.sourceId));
+monitorQueue.process('poll', Number(process.env.EARLYBIRD_SOURCE_CONCURRENCY || 2), async job => monitor.pollSource(job.data.sourceId));
 
 async function scheduleSources() {
   const sources = await prisma.earlyBirdSource.findMany({ where: { enabled: true } });
