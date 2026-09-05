@@ -179,7 +179,7 @@ describe('event story pipeline', () => {
     process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
     const post = { id: 'p1', postId: '1', authorUsername: 'openai', sourceUrl: 'https://x.com/openai/status/1', text: 'Primary announcement', rawData: { id: '1', text: 'Primary announcement' }, createdAt: new Date('2026-09-05T00:00:00Z') };
     const related = { id: 'p2', postId: '2', authorUsername: 'geminiapp', sourceUrl: 'https://x.com/geminiapp/status/2', text: 'Related official detail', rawData: { id: '2', text: 'Related official detail' }, createdAt: new Date('2026-09-05T00:10:00Z'), source: { handle: 'geminiapp', website: 'https://gemini.google.com' }, jobs: [] };
-    const job = { id: 'j1', status: 'detected', metadata: null, postId: post.id, sourceId: 's1', post, source: { handle: 'openai', website: 'https://openai.com' }, draft: null };
+    const job = { id: 'j1', status: 'detected', metadata: null, detectedAt: new Date('2026-09-05T00:20:00Z'), postId: post.id, sourceId: 's1', post, source: { handle: 'openai', website: 'https://openai.com' }, draft: null };
     const updates = [];
     const prisma = {
       earlyBirdArticleJob: {
@@ -215,6 +215,9 @@ describe('event story pipeline', () => {
       expect(result.status).toBe('rendered');
       expect(collect).toHaveBeenCalledWith(expect.objectContaining({ post }));
       expect(collect).toHaveBeenCalledWith(expect.objectContaining({ post: related }));
+      expect(prisma.earlyBirdPost.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ createdAt: { gte: new Date('2026-09-04T23:20:00Z'), lte: new Date('2026-09-05T00:20:00Z') } }),
+      }));
       expect(prisma.earlyBirdArticleJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'merged' } }));
     } finally {
       if (originalThreadWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;

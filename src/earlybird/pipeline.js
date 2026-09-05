@@ -52,8 +52,9 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
           timeoutMs: Math.max(1000, configuredNumber('EARLYBIRD_THREAD_TIMEOUT_MS', 60000)),
         });
         await prisma.earlyBirdPost.update({ where: { id: job.postId }, data: { threadData: thread } });
+        const detectedAt = job.detectedAt ? new Date(job.detectedAt) : new Date();
         const recentPosts = await prisma.earlyBirdPost.findMany({
-          where: { id: { not: job.postId }, createdAt: { gte: new Date(Date.now() - eventWindowMs()) } },
+          where: { id: { not: job.postId }, createdAt: { gte: new Date(detectedAt.getTime() - eventWindowMs()), lte: detectedAt } },
           include: { source: { select: { handle: true, website: true } }, jobs: { select: { id: true, status: true, metadata: true } } },
           orderBy: { createdAt: 'desc' },
           take: 40,
