@@ -60,7 +60,7 @@ function articleReferences(storyPosts, research) {
 
 function videoPosterPath(assets) {
   const video = assets.find(asset => asset.kind === 'video');
-  return video?.metadata?.keyframes?.find(Boolean) || video?.metadata?.posterPath;
+  return video?.metadata?.posterPath || video?.metadata?.keyframes?.find(Boolean);
 }
 
 export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, logger = console } = {}) {
