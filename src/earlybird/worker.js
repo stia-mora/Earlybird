@@ -35,10 +35,12 @@ monitorQueue.process('poll', Number(process.env.EARLYBIRD_SOURCE_CONCURRENCY || 
 
 async function scheduleSources() {
   const sources = await prisma.earlyBirdSource.findMany({ where: { enabled: true } });
-  for (const source of sources) {
+  for (const [index, source] of sources.entries()) {
+    const every = Math.max(15000, source.pollIntervalSeconds * 1000);
+    const staggerMs = Math.max(1000, Math.floor(every / sources.length));
     await monitorQueue.add('poll', { sourceId: source.id }, {
       jobId: `earlybird-poll-${source.id}`,
-      repeat: { every: Math.max(15000, source.pollIntervalSeconds * 1000) },
+      repeat: { every, startDate: new Date(Date.now() + 1000 + index * staggerMs) },
       attempts: 2,
       backoff: { type: 'fixed', delay: 10000 },
       removeOnComplete: 10,
