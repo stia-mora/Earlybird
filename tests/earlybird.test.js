@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 import { createSourceMonitor } from '../src/earlybird/sourceMonitor.js';
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
@@ -93,6 +94,10 @@ describe('thread assembly and humanizer', () => {
     const visuals = articleVisualAssets([{ id: 'v1', kind: 'video', sourceUrl: 'https://x.com/video', metadata: { posterPath: 'poster.jpg', keyframes: ['frame-1.jpg', 'frame-2.jpg'] } }]);
     expect(visuals.map(item => item.localPath)).toEqual(['poster.jpg', 'frame-1.jpg', 'frame-2.jpg']);
   });
+  it('keeps X post screenshots alongside downloaded media', () => {
+    const visuals = articleVisualAssets([{ kind: 'x-post-evidence', sourceUrl: 'https://x.com/openai/status/1', localPath: 'post-evidence.png' }]);
+    expect(visuals).toEqual([expect.objectContaining({ localPath: 'post-evidence.png', kind: 'x-post-evidence' })]);
+  });
 });
 
 describe('Graphite renderer', () => {
@@ -112,13 +117,15 @@ describe('Graphite renderer', () => {
     const html = await renderGzhMarkdown('这是一条简短但完整的快讯。', { contentType: 'brief' });
     expect(html).not.toContain('>01<');
   });
-  it('renders dynamic third-level headings and omits evidence and generic provenance blocks', async () => {
-    const html = await renderGzhMarkdown('事实钩子。\n\n### 第一段\n\n具体事实。\n\n### 第二段\n\n后续问题。', { evidencePath: 'evidence.png', sourceUrl: 'https://x.com/source', sourceNote: '不应出现' });
+  it('renders dynamic third-level headings and keeps sources only in a final reference list', async () => {
+    const html = await renderGzhMarkdown('事实钩子。\n\n### 第一段\n\n[官网材料](https://openai.com/inside) 支持这项事实。\n\n### 第二段\n\n后续问题。', { references: ['https://x.com/source', 'https://openai.com/inside'] });
     expect(html).toContain('>01<');
     expect(html).toContain('>02<');
-    expect(html).not.toContain('原帖证据与中文翻译');
-    expect(html).not.toContain('不应出现');
+    expect(html).toContain('参考资料：');
+    expect(html).toContain('https://x.com/source');
+    expect(html).toContain('https://openai.com/inside');
     expect(html).not.toContain('查看 X 原文');
+    expect(html).not.toContain('<a ');
   });
 });
 
@@ -195,6 +202,8 @@ describe('event story pipeline', () => {
     const job = { id: 'j1', status: 'detected', metadata: null, detectedAt: new Date('2026-09-05T00:20:00Z'), postId: post.id, sourceId: 's1', post, source: { handle: 'openai', website: 'https://openai.com' }, draft: null };
     const updates = [];
     const videoAsset = { id: 'a1', postId: post.id, kind: 'video', sourceUrl: 'https://x.com/video', localPath: 'video.mp4', metadata: { posterPath: 'poster.jpg', keyframes: ['frame-1.jpg'] } };
+    const primaryEvidence = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', '1-evidence.png');
+    const relatedEvidence = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', '2-evidence.png');
     const prisma = {
       earlyBirdArticleJob: {
         findUnique: vi.fn(async () => job),
@@ -210,10 +219,11 @@ describe('event story pipeline', () => {
       },
     };
     const collect = vi.fn(async ({ post: target }) => []);
+    const evidence = vi.fn(async () => ({ path: 'evidence.png' }));
     const llmClient = { complete: vi.fn(async ({ system }) => {
       if (system.includes('微信公众号总编辑')) return { publish: true, contentType: 'event', newsworthiness: 90, relatedPostIds: ['p2'], reason: '同一发布事件', searchQueries: [] };
       const detail = '两条官方动态构成同一事件，并提供了明确的发布范围与后续观察线索。'.repeat(35);
-      const markdown = `事实钩子。\n\n## 第一条线索\n\n${detail}\n\n![视频封面](poster.jpg)\n\n### 发布范围\n\n${detail}\n\n## 接下来要看什么\n\n${detail}`;
+      const markdown = `事实钩子。\n\n## 第一条线索\n\n${detail}\n\n![主帖截图](${primaryEvidence})\n\n### 发布范围\n\n${detail}\n\n![相关帖截图](${relatedEvidence})\n\n## 接下来要看什么\n\n${detail}\n\n![视频封面](poster.jpg)`;
       if (system.includes('Humanizer-zh')) return { markdown, score: 48 };
       return { title: '合并后的官方动态', digest: '两条官方动态构成同一事件。', markdown };
     }) };
@@ -223,7 +233,7 @@ describe('event story pipeline', () => {
       llmClient,
       wechatClient: null,
       mediaPipeline: { collect },
-      evidence: vi.fn(async () => ({ path: 'evidence.png' })),
+      evidence,
       analyze: vi.fn(async () => ({ translation: '中文翻译', digest: '两条官方动态构成同一事件。', facts: ['两个官方账号先后发布关联信息。'] })),
     });
 
@@ -238,6 +248,7 @@ describe('event story pipeline', () => {
         where: expect.objectContaining({ createdAt: { gte: new Date('2026-09-04T23:20:00Z'), lte: new Date('2026-09-05T00:20:00Z') } }),
       }));
       expect(prisma.earlyBirdArticleJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'merged' } }));
+      expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ tweetUrl: related.sourceUrl, postId: related.postId, showTranslation: false }));
     } finally {
       if (originalThreadWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
       else process.env.EARLYBIRD_THREAD_WAIT_MS = originalThreadWait;

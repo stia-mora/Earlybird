@@ -49,14 +49,9 @@ function markKeywords(text) {
 }
 
 function inline(text) {
-  const links = [];
-  const protectedText = String(text).replace(/\[(.+?)\]\((https?:\/\/[^)]+)\)/g, (_match, label, url) => {
-    links.push({ label, url });
-    return `@@LINK${links.length - 1}@@`;
-  });
-  let value = escapeHtml(fullWidthPunctuation(protectedText));
+  const withoutLinks = String(text).replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1');
+  let value = escapeHtml(fullWidthPunctuation(withoutLinks));
   value = value.replace(/\*\*(.+?)\*\*/g, '<strong><span leaf="$1">$1</span></strong>');
-  links.forEach(({ label, url }, index) => { value = value.replace(`@@LINK${index}@@`, `<a href="${escapeHtml(url)}" style="color:#52525B;text-decoration:underline;">${escapeHtml(fullWidthPunctuation(label))}</a>`); });
   if (value.includes('<')) {
     return value.replace(/(^|>)([^<]+)(?=<|$)/g, (match, prefix, text) => {
       if (!/[\u4e00-\u9fff]/.test(text) || text.includes('leaf=')) return match;
@@ -66,7 +61,18 @@ function inline(text) {
   return markKeywords(value);
 }
 
-export async function renderGzhMarkdown(markdown, { title, digest, contentType } = {}) {
+function referenceUrls(references) {
+  const urls = new Set();
+  for (const reference of references || []) {
+    try {
+      const url = new URL(reference);
+      if (url.protocol === 'https:') urls.add(url.toString());
+    } catch {}
+  }
+  return [...urls].slice(0, 8);
+}
+
+export async function renderGzhMarkdown(markdown, { title, digest, contentType, references = [] } = {}) {
   await loadGzhSources();
   const lines = String(markdown || '').replace(/\r/g, '').split('\n');
   const sections = [];
@@ -101,5 +107,14 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType }
     }
     html += '</section>';
   });
+  const sourceUrls = referenceUrls(references);
+  if (sourceUrls.length) {
+    html += '<section style="margin:48px 10px 28px;padding-top:20px;border-top:1px solid #E4E4E7;">';
+    html += '<p style="font-size:14px;color:#71717A;line-height:1.8;margin:0 0 12px;"><span leaf="">参考资料：</span></p>';
+    sourceUrls.forEach(url => {
+      html += `<p style="font-size:13px;color:#71717A;line-height:1.8;margin:0 0 8px;word-break:break-all;"><span leaf="">${escapeHtml(url)}</span></p>`;
+    });
+    html += '</section>';
+  }
   return `${html}</section>`;
 }

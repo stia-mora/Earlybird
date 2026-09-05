@@ -16,7 +16,7 @@ export function assertTweetEvidence({ pageText = '', articleText = '', hasExpect
   if (!hasExpectedStatusLink) throw new Error('X post card did not contain the expected status link; evidence screenshot was not created');
 }
 
-export async function captureEvidence({ tweetUrl, postId, translation = '', outputPath, browser, launchOptions = {}, thread = [] } = {}) {
+export async function captureEvidence({ tweetUrl, postId, translation = '', showTranslation = true, outputPath, browser, launchOptions = {}, thread = [] } = {}) {
   if (!tweetUrl || !outputPath) throw new Error('tweetUrl and outputPath are required');
   if (postId && !/^\d+$/.test(String(postId))) throw new Error('postId must be a numeric X status ID');
   await mkdir(dirname(outputPath), { recursive: true });
@@ -61,7 +61,10 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', outp
     const raw = await shot.screenshot({ type: 'png' });
     const encoded = raw.toString('base64');
     const threadNote = thread.length > 1 ? `<p style="font-size:13px;color:#71717A;margin:12px 0 0;"><span leaf="">线程共 ${thread.length} 条，以下为根帖证据。</span></p>` : '';
-    const html = `<section style="width:1280px;padding:32px;background:#FFFFFF;font-family:'Noto Sans CJK SC','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;color:#27272A;"><img src="data:image/png;base64,${encoded}" style="max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid #E4E4E7;"><p style="font-size:18px;line-height:1.8;margin:24px 0 0;padding-top:20px;border-top:1px solid #E4E4E7;"><span leaf="">${escapeHtml(fullWidthPunctuation(translation || '暂无中文翻译'))}</span></p>${threadNote}</section>`;
+    const translationBlock = showTranslation
+      ? `<p style="font-size:18px;line-height:1.8;margin:24px 0 0;padding-top:20px;border-top:1px solid #E4E4E7;"><span leaf="">${escapeHtml(fullWidthPunctuation(translation || '暂无中文翻译'))}</span></p>`
+      : '';
+    const html = `<section style="width:1280px;padding:32px;background:#FFFFFF;font-family:'Noto Sans CJK SC','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;color:#27272A;"><img src="data:image/png;base64,${encoded}" style="max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid #E4E4E7;">${translationBlock}${threadNote}</section>`;
     const composite = await ownBrowser.newPage();
     await composite.setContent(html, { waitUntil: 'load' });
     await composite.screenshot({ path: outputPath, fullPage: true, type: 'png' });
