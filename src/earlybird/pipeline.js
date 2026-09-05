@@ -5,7 +5,7 @@ import { humanize } from './humanizer.js';
 import { renderGzhMarkdown, validateGzhHtml } from './gzhRenderer.js';
 import { captureEvidence } from './evidenceCapture.js';
 import { createMediaPipeline } from './mediaPipeline.js';
-import { createArticleWriter } from './articleWriter.js';
+import { articleVisualAssets, createArticleWriter } from './articleWriter.js';
 import { createWeChatClient } from './wechatClient.js';
 import { classifyEditorial } from './editorialClassifier.js';
 import { collectResearchImages, researchOfficialSources } from './researchBrowser.js';
@@ -25,11 +25,6 @@ function configuredNumber(name, fallback) {
   if (value == null || value === '') return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function sourceNote(post, storyPosts) {
-  const sources = storyPosts.map(item => `@${item.authorUsername || item.source?.handle || 'unknown'}（${item.createdAt ? new Date(item.createdAt).toISOString().slice(0, 16).replace('T', ' ') : '时间未知'}）`);
-  return `信息来源：${sources.join('；')}。${storyPosts.length > 1 ? '本文合并整理多条官方动态。' : ''}本文为信息整理与翻译，转载前请确认平台规则及版权授权。`;
 }
 
 export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, logger = console } = {}) {
@@ -105,32 +100,27 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const polished = await humanize({ client: llmClient, markdown: article.markdown, context: { postId: job.post.postId, analysis, editorial, research: { queries: research.queries, citations: research.citations.map(citation => ({ title: citation.title, url: citation.url })) } } });
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: polished.manualReview ? 'manual_review' : 'humanized', markdown: polished.markdown, humanizerScore: polished.score, metadata: analysisMetadata } });
         if (polished.manualReview) return prisma.earlyBirdArticleJob.findUnique({ where: { id: job.id } });
-        let evidenceSrc = evidencePath;
         const assetUrls = new Map();
         if (!wechatClient) {
-          const html = await renderGzhMarkdown(polished.markdown, { evidencePath, title: article.title, digest: article.digest, sourceUrl: job.post.sourceUrl, sourceNote: sourceNote(job.post, storyPosts), contentType: editorial.contentType });
+          const html = await renderGzhMarkdown(polished.markdown, { title: article.title, digest: article.digest, contentType: editorial.contentType });
           await validateGzhHtml(html);
           return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html } });
         }
-        if (wechatClient?.uploadArticleImage) {
-          const uploadedEvidence = await wechatClient.uploadArticleImage(evidencePath);
-          evidenceSrc = uploadedEvidence.url || evidencePath;
-        }
-        const imageAssets = allAssets.filter(asset => asset.kind === 'image' && asset.localPath);
+        const visualAssets = articleVisualAssets(allAssets);
         let thumb = null;
-        if (imageAssets[0]) thumb = await wechatClient.uploadPermanentMaterial(imageAssets[0].localPath, 'thumb');
+        if (visualAssets[0]) thumb = await wechatClient.uploadPermanentMaterial(visualAssets[0].localPath, 'thumb');
         else thumb = await wechatClient.uploadPermanentMaterial(evidencePath, 'thumb');
-        for (const asset of imageAssets) {
+        for (const asset of visualAssets) {
           const uploaded = await wechatClient.uploadArticleImage(asset.localPath);
           if (uploaded.url) assetUrls.set(asset.localPath, uploaded.url);
-          await prisma.earlyBirdAsset.update({ where: { id: asset.id }, data: { wechatUrl: uploaded.url, status: 'uploaded' } });
+          if (asset.assetId) await prisma.earlyBirdAsset.update({ where: { id: asset.assetId }, data: { wechatUrl: uploaded.url, status: 'uploaded' } });
         }
         for (const asset of allAssets.filter(item => item.kind === 'video' && item.localPath)) {
           const uploaded = await wechatClient.uploadPermanentMaterial(asset.localPath, 'video', { description: { title: `X 视频 ${job.post.postId}`, introduction: 'EarlyBird 视频素材，仅供草稿编辑使用。' } });
           await prisma.earlyBirdAsset.update({ where: { id: asset.id }, data: { wechatMediaId: uploaded.media_id, status: 'uploaded' } });
         }
         const markdownForRender = [...assetUrls.entries()].reduce((value, [localPath, url]) => value.replaceAll(localPath, url), polished.markdown);
-        const html = await renderGzhMarkdown(markdownForRender, { evidencePath: evidenceSrc, title: article.title, digest: article.digest, sourceUrl: job.post.sourceUrl, sourceNote: sourceNote(job.post, storyPosts), contentType: editorial.contentType });
+        const html = await renderGzhMarkdown(markdownForRender, { title: article.title, digest: article.digest, contentType: editorial.contentType });
         await validateGzhHtml(html);
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html } });
         const draft = await wechatClient.addDraft({ title: article.title.slice(0, 64), author: process.env.WECHAT_AUTHOR || '', digest: article.digest?.slice(0, 120), content: html, content_source_url: job.post.sourceUrl, thumb_media_id: thumb?.media_id || '' });

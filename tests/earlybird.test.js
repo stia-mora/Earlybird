@@ -9,6 +9,7 @@ import { classifyEditorial, normalizeEditorialDecision } from '../src/earlybird/
 import { isOfficialUrl, normalizeSearchQueries, officialHosts } from '../src/earlybird/researchBrowser.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline } from '../src/earlybird/pipeline.js';
+import { articleVisualAssets } from '../src/earlybird/articleWriter.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -88,6 +89,10 @@ describe('thread assembly and humanizer', () => {
     const result = await humanize({ client: { complete: async () => ({ markdown: '一句摘要。', score: 50 }) }, markdown, context: { editorial: { contentType: 'event' } } });
     expect(result.markdown).toBe(markdown);
   });
+  it('makes video posters and keyframes available as article evidence', () => {
+    const visuals = articleVisualAssets([{ id: 'v1', kind: 'video', sourceUrl: 'https://x.com/video', metadata: { posterPath: 'poster.jpg', keyframes: ['frame-1.jpg', 'frame-2.jpg'] } }]);
+    expect(visuals.map(item => item.localPath)).toEqual(['poster.jpg', 'frame-1.jpg', 'frame-2.jpg']);
+  });
 });
 
 describe('Graphite renderer', () => {
@@ -106,6 +111,14 @@ describe('Graphite renderer', () => {
   it('keeps a brief free of the default numbered section heading', async () => {
     const html = await renderGzhMarkdown('这是一条简短但完整的快讯。', { contentType: 'brief' });
     expect(html).not.toContain('>01<');
+  });
+  it('renders dynamic third-level headings and omits evidence and generic provenance blocks', async () => {
+    const html = await renderGzhMarkdown('事实钩子。\n\n### 第一段\n\n具体事实。\n\n### 第二段\n\n后续问题。', { evidencePath: 'evidence.png', sourceUrl: 'https://x.com/source', sourceNote: '不应出现' });
+    expect(html).toContain('>01<');
+    expect(html).toContain('>02<');
+    expect(html).not.toContain('原帖证据与中文翻译');
+    expect(html).not.toContain('不应出现');
+    expect(html).not.toContain('查看 X 原文');
   });
 });
 
@@ -195,7 +208,8 @@ describe('event story pipeline', () => {
     const collect = vi.fn(async ({ post: target }) => []);
     const llmClient = { complete: vi.fn(async ({ system }) => {
       if (system.includes('微信公众号总编辑')) return { publish: true, contentType: 'event', newsworthiness: 90, relatedPostIds: ['p2'], reason: '同一发布事件', searchQueries: [] };
-      const markdown = `## 一条线索\n\n${'两条官方动态构成同一事件，并提供了明确的发布范围。'.repeat(45)}`;
+      const detail = '两条官方动态构成同一事件，并提供了明确的发布范围与后续观察线索。'.repeat(35);
+      const markdown = `事实钩子。\n\n## 第一条线索\n\n${detail}\n\n### 发布范围\n\n${detail}\n\n## 接下来要看什么\n\n${detail}`;
       if (system.includes('Humanizer-zh')) return { markdown, score: 48 };
       return { title: '合并后的官方动态', digest: '两条官方动态构成同一事件。', markdown };
     }) };

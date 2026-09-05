@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { hasSufficientBody, markdownBodyLength } from './articleWriter.js';
+import { hasSufficientBody, markdownBodyLength, markdownHeadingCount, markdownImagePaths } from './articleWriter.js';
 
 const DEFAULT_RULES = ['避免“值得注意的是”“不仅……而且……”等模板化句式', '删除空泛总结和过度分段', '保留事实、数字、引用和不确定性', '使用自然的中文短句，避免宣传腔'];
 
@@ -23,6 +23,8 @@ export async function humanize({ client, markdown, context = {}, rulesText } = {
   let current = markdown;
   const contentType = context.editorial?.contentType;
   const originalLength = markdownBodyLength(markdown);
+  const originalHeadings = markdownHeadingCount(markdown);
+  const originalImages = markdownImagePaths(markdown).length;
   let score = 0;
   let attempts = 0;
   while (attempts <= 2) {
@@ -30,7 +32,9 @@ export async function humanize({ client, markdown, context = {}, rulesText } = {
     const candidate = result?.markdown;
     const preservesDensity = candidate
       && hasSufficientBody(candidate, contentType)
-      && markdownBodyLength(candidate) >= Math.floor(originalLength * 0.75);
+      && markdownBodyLength(candidate) >= Math.floor(originalLength * 0.75)
+      && markdownHeadingCount(candidate) >= originalHeadings
+      && markdownImagePaths(candidate).length >= originalImages;
     if (preservesDensity) current = candidate;
     score = preservesDensity ? (Number(result?.score) || scoreHumanized(current)) : scoreHumanized(current);
     attempts += 1;
