@@ -40,6 +40,19 @@ async function ensureTweetVideoFrame(card, mediaPosterPath) {
   const hasVideo = await card.$('[data-testid="videoPlayer"]');
   if (!hasVideo) return;
   await hasVideo.dispose().catch(() => {});
+  if (mediaPosterPath) {
+    const dataUrl = `data:image/jpeg;base64,${(await readFile(mediaPosterPath)).toString('base64')}`;
+    await card.evaluate((element, source) => {
+      const player = element.querySelector('[data-testid="videoPlayer"]');
+      if (!player) return;
+      const image = document.createElement('img');
+      image.src = source;
+      image.alt = 'X 视频首帧';
+      image.style.cssText = 'display:block;width:100%;height:100%;object-fit:cover;background:#000;';
+      player.replaceChildren(image);
+    }, dataUrl);
+    return;
+  }
   const ready = await card.evaluate(async element => {
     element.scrollIntoView({ block: 'center' });
     const video = element.querySelector('[data-testid="videoPlayer"] video');
@@ -53,17 +66,7 @@ async function ensureTweetVideoFrame(card, mediaPosterPath) {
     return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
   });
   if (ready) return;
-  if (!mediaPosterPath) throw new Error('X post video did not render a preview frame; evidence screenshot was not created');
-  const dataUrl = `data:image/jpeg;base64,${(await readFile(mediaPosterPath)).toString('base64')}`;
-  await card.evaluate((element, source) => {
-    const player = element.querySelector('[data-testid="videoPlayer"]');
-    if (!player) return;
-    const image = document.createElement('img');
-    image.src = source;
-    image.alt = 'X 视频首帧';
-    image.style.cssText = 'display:block;width:100%;height:100%;object-fit:cover;background:#000;';
-    player.replaceChildren(image);
-  }, dataUrl);
+  if (!ready) throw new Error('X post video did not render a preview frame; evidence screenshot was not created');
 }
 
 async function findTweetCard(page, postId) {
