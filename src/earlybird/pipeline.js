@@ -73,7 +73,6 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
       if (['ignored', 'merged'].includes(job.status) && !force) return job;
       const priorMetadata = jobMetadata(job);
       const priorEditorial = priorMetadata.editorial || {};
-      if (job.status === 'held' && !force && Date.parse(priorEditorial.holdUntil || '') > Date.now()) return job;
       try {
         const scraper = await scraperFactory(job.source);
         const thread = await assembleThread({
@@ -94,12 +93,6 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const editorialMetadata = { ...priorMetadata, editorial };
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'classified', attempts: { increment: 1 }, error: null, metadata: editorialMetadata } });
         if (!editorial.publish) return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'ignored', metadata: editorialMetadata } });
-
-        const firstHold = editorial.contentType === 'explainer' && !force && !priorEditorial.holdUntil;
-        if (firstHold) {
-          const heldEditorial = { ...editorial, holdUntil: new Date(Date.now() + eventWindowMs()).toISOString() };
-          return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'held', metadata: { ...priorMetadata, editorial: heldEditorial } } });
-        }
 
         const relatedPosts = recentPosts.filter(item => editorial.relatedPostIds.includes(item.id));
         const storyPosts = [job.post, ...relatedPosts];
