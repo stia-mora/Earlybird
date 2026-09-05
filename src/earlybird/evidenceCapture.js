@@ -1,7 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import puppeteer from 'puppeteer';
-import { escapeHtml, fullWidthPunctuation } from './utils.js';
 import { parseCookieString } from '../scrapers/twitter/http/auth.js';
 
 const DENIED_PAGE = /access to x\.com was denied|http error 403|you don't have authorization/i;
@@ -14,6 +13,27 @@ export function assertTweetEvidence({ pageText = '', articleText = '', hasExpect
   if (DENIED_PAGE.test(pageText) || DENIED_PAGE.test(articleText)) throw new Error('X denied access to the post page; evidence screenshot was not created');
   if (!articleText.trim()) throw new Error('X post card was empty; evidence screenshot was not created');
   if (!hasExpectedStatusLink) throw new Error('X post card did not contain the expected status link; evidence screenshot was not created');
+}
+
+async function expandTweetCard(card) {
+  await card.evaluate(element => {
+    for (const control of element.querySelectorAll('[role="button"], a')) {
+      if (/^(show more|显示更多|展开)$/i.test(control.textContent?.trim() || '')) control.click();
+    }
+  });
+}
+
+async function addInlineTranslation(card, translation) {
+  if (!translation?.trim()) return;
+  await card.evaluate(value => {
+    const text = document.querySelector('[data-testid="tweetText"]');
+    if (!text || document.querySelector('[data-earlybird-translation="true"]')) return;
+    const block = document.createElement('div');
+    block.dataset.earlybirdTranslation = 'true';
+    block.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid rgb(207,217,222);font-size:15px;line-height:1.45;color:rgb(15,20,25);white-space:pre-wrap;';
+    block.textContent = value;
+    text.insertAdjacentElement('afterend', block);
+  }, translation.trim());
 }
 
 export async function captureEvidence({ tweetUrl, postId, translation = '', showTranslation = true, outputPath, browser, launchOptions = {}, thread = [] } = {}) {
@@ -58,17 +78,9 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', show
       shot.evaluate(element => element.innerText || ''),
     ]);
     assertTweetEvidence({ pageText, articleText });
-    const raw = await shot.screenshot({ type: 'png' });
-    const encoded = raw.toString('base64');
-    const threadNote = thread.length > 1 ? `<p style="font-size:13px;color:#71717A;margin:12px 0 0;"><span leaf="">线程共 ${thread.length} 条，以下为根帖证据。</span></p>` : '';
-    const translationBlock = showTranslation
-      ? `<p style="font-size:18px;line-height:1.8;margin:24px 0 0;padding-top:20px;border-top:1px solid #E4E4E7;"><span leaf="">${escapeHtml(fullWidthPunctuation(translation || '暂无中文翻译'))}</span></p>`
-      : '';
-    const html = `<section style="width:1280px;padding:32px;background:#FFFFFF;font-family:'Noto Sans CJK SC','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;color:#27272A;"><img src="data:image/png;base64,${encoded}" style="max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid #E4E4E7;">${translationBlock}${threadNote}</section>`;
-    const composite = await ownBrowser.newPage();
-    await composite.setContent(html, { waitUntil: 'load' });
-    await composite.screenshot({ path: outputPath, fullPage: true, type: 'png' });
-    await composite.close();
+    await expandTweetCard(shot);
+    if (showTranslation) await addInlineTranslation(shot, translation);
+    const raw = await shot.screenshot({ path: outputPath, type: 'png' });
     return { path: resolve(outputPath), bytes: (await readFile(outputPath)).length, rawBytes: raw.length };
   } finally {
     await page.close().catch(() => {});
