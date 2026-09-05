@@ -29,10 +29,17 @@ function configuredNumber(name, fallback) {
 
 async function collectAssets({ prisma, mediaPipeline, post, thread }) {
   const collected = await mediaPipeline.collect({ post, thread });
-  if (!prisma?.earlyBirdAsset?.findMany) return collected;
+  const threadPostIds = new Set([
+    post.postId,
+    post.rawData?.id,
+    ...thread.map(item => item?.id || item?.id_str),
+  ].filter(Boolean).map(String));
+  const belongsToThread = asset => !asset.metadata?.tweetId || threadPostIds.has(String(asset.metadata.tweetId));
+  const threadAssets = collected.filter(belongsToThread);
+  if (!prisma?.earlyBirdAsset?.findMany) return threadAssets;
   const stored = await prisma.earlyBirdAsset.findMany({ where: { postId: post.id, localPath: { not: null } } });
-  const known = new Set(collected.map(asset => asset.id || `${asset.sourceUrl}:${asset.localPath}`));
-  return [...collected, ...stored.filter(asset => !known.has(asset.id || `${asset.sourceUrl}:${asset.localPath}`))];
+  const known = new Set(threadAssets.map(asset => asset.id || `${asset.sourceUrl}:${asset.localPath}`));
+  return [...threadAssets, ...stored.filter(asset => belongsToThread(asset) && !known.has(asset.id || `${asset.sourceUrl}:${asset.localPath}`))];
 }
 
 function postEvidenceAsset(post, localPath) {

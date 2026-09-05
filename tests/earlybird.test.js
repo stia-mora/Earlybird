@@ -202,6 +202,7 @@ describe('event story pipeline', () => {
     const job = { id: 'j1', status: 'detected', metadata: null, detectedAt: new Date('2026-09-05T00:20:00Z'), postId: post.id, sourceId: 's1', post, source: { handle: 'openai', website: 'https://openai.com' }, draft: null };
     const updates = [];
     const videoAsset = { id: 'a1', postId: post.id, kind: 'video', sourceUrl: 'https://x.com/video', localPath: 'video.mp4', metadata: { posterPath: 'poster.jpg', keyframes: ['frame-1.jpg'] } };
+    const unrelatedImage = { id: 'a2', postId: post.id, kind: 'image', sourceUrl: 'https://pbs.twimg.com/media/unrelated.jpg', localPath: 'unrelated.jpg', metadata: { tweetId: '999' } };
     const primaryEvidence = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', '1-evidence.png');
     const relatedEvidence = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', '2-evidence.png');
     const prisma = {
@@ -215,13 +216,15 @@ describe('event story pipeline', () => {
         findMany: vi.fn(async () => [related]),
       },
       earlyBirdAsset: {
-        findMany: vi.fn(async ({ where }) => where.postId === post.id ? [videoAsset] : []),
+        findMany: vi.fn(async ({ where }) => where.postId === post.id ? [videoAsset, unrelatedImage] : []),
       },
     };
     const collect = vi.fn(async ({ post: target }) => []);
     const evidence = vi.fn(async () => ({ path: 'evidence.png' }));
-    const llmClient = { complete: vi.fn(async ({ system }) => {
+    let writerVisuals = [];
+    const llmClient = { complete: vi.fn(async ({ system, user }) => {
       if (system.includes('微信公众号总编辑')) return { publish: true, contentType: 'event', newsworthiness: 90, relatedPostIds: ['p2'], reason: '同一发布事件', searchQueries: [] };
+      if (user.includes('"availableVisuals"')) writerVisuals = JSON.parse(user).availableVisuals;
       const detail = '两条官方动态构成同一事件，并提供了明确的发布范围与后续观察线索。'.repeat(35);
       const markdown = `事实钩子。\n\n## 第一条线索\n\n${detail}\n\n![主帖截图](${primaryEvidence})\n\n### 发布范围\n\n${detail}\n\n![相关帖截图](${relatedEvidence})\n\n## 接下来要看什么\n\n${detail}\n\n![视频封面](poster.jpg)`;
       if (system.includes('Humanizer-zh')) return { markdown, score: 48 };
@@ -249,6 +252,7 @@ describe('event story pipeline', () => {
       }));
       expect(prisma.earlyBirdArticleJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'merged' } }));
       expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ tweetUrl: related.sourceUrl, postId: related.postId, showTranslation: false }));
+      expect(writerVisuals.map(asset => asset.localPath)).not.toContain('unrelated.jpg');
     } finally {
       if (originalThreadWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
       else process.env.EARLYBIRD_THREAD_WAIT_MS = originalThreadWait;
