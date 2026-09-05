@@ -12,7 +12,7 @@ import { classifyEditorial, normalizeEditorialDecision } from '../src/earlybird/
 import { isOfficialUrl, normalizeSearchQueries, officialHosts } from '../src/earlybird/researchBrowser.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline } from '../src/earlybird/pipeline.js';
-import { articleVisualAssets, compactEditorialMarkdown, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH } from '../src/earlybird/articleWriter.js';
+import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH } from '../src/earlybird/articleWriter.js';
 import { enqueueInterruptedJobs } from '../src/earlybird/jobRecovery.js';
 
 function prismaFixture() {
@@ -175,6 +175,22 @@ describe('thread assembly and humanizer', () => {
   it('keeps X post screenshots alongside downloaded media', () => {
     const visuals = articleVisualAssets([{ kind: 'x-post-evidence', sourceUrl: 'https://x.com/openai/status/1', localPath: 'post-evidence.png' }]);
     expect(visuals).toEqual([expect.objectContaining({ localPath: 'post-evidence.png', kind: 'x-post-evidence' })]);
+  });
+  it('reports missing long-form requirements and lets a final revision satisfy them', async () => {
+    const evidence = 'post-evidence.png';
+    const paragraphs = Array.from({ length: 30 }, () => 'OpenAI 的公开说明把事件披露、代理外部行动和后续治理放在同一条可核查的事实链中。').join('\n\n');
+    const complete = vi.fn()
+      .mockResolvedValueOnce({ title: '短稿', digest: '摘要', markdown: '这是一段不完整的短稿。' })
+      .mockResolvedValueOnce({ title: '仍然过短', digest: '摘要', markdown: '这是一段不完整的短稿。' })
+      .mockResolvedValueOnce({ title: '完整稿', digest: '摘要', markdown: `开篇事实说明事件正在改变公开披露的边界。\n\n![原帖截图](${evidence})\n\n${paragraphs}\n\n## 披露口径正在变化\n\n${paragraphs}\n\n## 代理行动的边界\n\n${paragraphs}\n\n## 接下来观察什么\n\n${paragraphs}` });
+    const writer = createArticleWriter({ client: { complete } });
+    const article = await writer.write({
+      post: { text: '官方说明', sourceUrl: 'https://x.com/openai/status/1' },
+      analysis: { facts: [] }, editorial: { contentType: 'explainer' },
+      assets: [{ kind: 'x-post-evidence', localPath: evidence, sourceUrl: 'https://x.com/openai/status/1' }],
+    });
+    expect(complete).toHaveBeenCalledTimes(3);
+    expect(editorialStructureIssues(article.markdown, 'explainer', articleVisualAssets([{ kind: 'x-post-evidence', localPath: evidence }]))).toEqual([]);
   });
   it('removes Markdown emphasis and breaks article paragraphs into readable lengths', () => {
     const markdown = `- **启动阶段（Day 0）**：__系统先从零开始建立形式化陈述网络__，并逐步验证每一个可以复核的推理节点。${'系统先从零开始建立形式化陈述网络，并逐步验证每一个可以复核的推理节点。'.repeat(5)}`;

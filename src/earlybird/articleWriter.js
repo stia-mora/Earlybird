@@ -97,17 +97,23 @@ export function articleVisualAssets(assets = []) {
 }
 
 export function hasEditorialStructure(markdown, contentType, visualAssets = []) {
-  if (!hasSufficientBody(markdown, contentType)) return false;
-  if (!hasCompactPresentation(markdown)) return false;
-  if (!['explainer', 'event'].includes(contentType)) return true;
+  return editorialStructureIssues(markdown, contentType, visualAssets).length === 0;
+}
+
+export function editorialStructureIssues(markdown, contentType, visualAssets = []) {
+  const issues = [];
+  if (!hasSufficientBody(markdown, contentType)) issues.push(`正文不足 ${MINIMUM_BODY_LENGTH[contentType] || MINIMUM_BODY_LENGTH.explainer} 个中文字符`);
+  if (!hasCompactPresentation(markdown)) issues.push(`存在星号 Markdown 标记或超过 ${MAX_PARAGRAPH_LENGTH} 个字符的段落`);
+  if (!['explainer', 'event'].includes(contentType)) return issues;
   const headings = markdownHeadingCount(markdown);
-  if (headings < 3 || headings > 5) return false;
+  if (headings < 3 || headings > 5) issues.push('需要 3 至 5 个叙事性二级或三级标题');
   const requiredVisuals = Math.min(3, visualAssets.length);
   const allowedPaths = new Set(visualAssets.map(asset => asset.localPath));
   const paths = markdownImagePaths(markdown);
   const evidencePaths = visualAssets.filter(asset => asset.kind === 'x-post-evidence').map(asset => asset.localPath);
-  return paths.filter(path => allowedPaths.has(path)).length >= requiredVisuals
-    && evidencePaths.every(path => paths.includes(path));
+  if (paths.filter(path => allowedPaths.has(path)).length < requiredVisuals) issues.push(`需要插入至少 ${requiredVisuals} 张真实素材图片`);
+  if (evidencePaths.some(path => !paths.includes(path))) issues.push('必须插入每一张 X 原帖截图');
+  return issues;
 }
 
 export function createArticleWriter({ client } = {}) {
@@ -132,7 +138,15 @@ brief 可不用标题。explainer 与 event 必须各自使用 3 至 5 个由你
       });
       const compactRevised = revised?.markdown && revised?.title ? { ...revised, markdown: compactEditorialMarkdown(revised.markdown) } : null;
       if (compactRevised && hasEditorialStructure(compactRevised.markdown, editorial.contentType, visualAssets)) return compactRevised;
-      throw new Error(`${editorial.contentType || 'article'} body did not meet the required narrative structure`);
+      const issues = editorialStructureIssues(compactRevised?.markdown || article.markdown, editorial.contentType, visualAssets);
+      const repaired = await client.complete({
+        system: `你是中文科技编辑，正在完成最后一次定向修订。只返回 JSON：title、digest、markdown。候选稿未通过发布校验，必须逐项修正：${issues.join('；')}。只保留可核查事实，不得编造；禁止 URL、Markdown 外链、**、*、__ 和星号列表。explainer 至少 1600 个中文字符，event 至少 2200 个中文字符；每段 35 至 80 个汉字且不超过 96 个字符。explainer 与 event 必须有 3 至 5 个由内容决定的二级或三级标题。每一张 availableVisuals 中 kind 为 x-post-evidence 的图片必须用精确路径插入正文，并在相邻文字说明它能证明的事实。`,
+        user: JSON.stringify({ candidate: compactRevised || article, post, thread, analysis, editorial, storyPosts, research, availableVisuals: visualAssets, sourceUrl }),
+      });
+      const compactRepaired = repaired?.markdown && repaired?.title ? { ...repaired, markdown: compactEditorialMarkdown(repaired.markdown) } : null;
+      if (compactRepaired && hasEditorialStructure(compactRepaired.markdown, editorial.contentType, visualAssets)) return compactRepaired;
+      const finalIssues = editorialStructureIssues(compactRepaired?.markdown || compactRevised?.markdown || article.markdown, editorial.contentType, visualAssets);
+      throw new Error(`${editorial.contentType || 'article'} body did not meet the required narrative structure: ${finalIssues.join('；')}`);
     },
   };
 }
