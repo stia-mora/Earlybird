@@ -87,6 +87,7 @@ services:
       EARLYBIRD_STT_MODEL: ${EARLYBIRD_STT_MODEL:-gpt-4o-mini-transcribe}
       EARLYBIRD_HERMES_RELAY_URL: ${EARLYBIRD_HERMES_RELAY_URL:-http://host.docker.internal:8767/notify}
       EARLYBIRD_HERMES_RELAY_TOKEN_FILE: /run/secrets/earlybird-hermes-relay-token
+      EARLYBIRD_HERMES_TIMEOUT_MS: ${EARLYBIRD_HERMES_TIMEOUT_MS:-45000}
     volumes:
       - earlybird_media:/app/data/earlybird/media
       - ./data/earlybird/x.com_cookies.txt:/run/secrets/earlybird-x-cookies.txt:ro
@@ -176,6 +177,7 @@ services:
       EARLYBIRD_STT_MODEL: ${EARLYBIRD_STT_MODEL:-gpt-4o-mini-transcribe}
       EARLYBIRD_HERMES_RELAY_URL: ${EARLYBIRD_HERMES_RELAY_URL:-http://host.docker.internal:8767/notify}
       EARLYBIRD_HERMES_RELAY_TOKEN_FILE: /run/secrets/earlybird-hermes-relay-token
+      EARLYBIRD_HERMES_TIMEOUT_MS: ${EARLYBIRD_HERMES_TIMEOUT_MS:-45000}
       EARLYBIRD_DAILY_SUMMARY_CRON: ${EARLYBIRD_DAILY_SUMMARY_CRON:-0 21 * * *}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PUPPETEER_HEADLESS: "true"

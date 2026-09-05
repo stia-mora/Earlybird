@@ -46,7 +46,7 @@ const server = createServer(async (request, response) => {
     const message = String(payload.message || '').trim();
     const subject = String(payload.subject || '').trim();
     if (!message || message.length > 8_000 || subject.length > 160) throw new Error('invalid notification payload');
-    await execFileAsync(hermes, ['send', '--to', target, '--subject', subject, '--quiet', message], { windowsHide: true, timeout: 30_000 });
+    await execFileAsync(hermes, ['send', '--to', target, '--subject', subject, '--quiet', message], { windowsHide: true, timeout: 45_000 });
     response.writeHead(202, { 'content-type': 'application/json' }).end('{"status":"sent"}');
   } catch (error) {
     response.writeHead(502, { 'content-type': 'application/json' }).end(JSON.stringify({ error: error.message }));

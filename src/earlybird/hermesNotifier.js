@@ -12,7 +12,7 @@ export function createHermesNotifier({
   tokenFile = process.env.EARLYBIRD_HERMES_RELAY_TOKEN_FILE,
   fetchImpl = globalThis.fetch,
   now = () => new Date(),
-  timeoutMs = Number(process.env.EARLYBIRD_HERMES_TIMEOUT_MS || 10000),
+  timeoutMs = Number(process.env.EARLYBIRD_HERMES_TIMEOUT_MS || 45000),
 } = {}) {
   const store = prisma?.earlyBirdNotification;
   let loadedToken = token || null;
