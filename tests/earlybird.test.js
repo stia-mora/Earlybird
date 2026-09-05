@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
-import { cacheScraperFactory, createSourceMonitor, retryAtFromRateLimit } from '../src/earlybird/sourceMonitor.js';
+import { cacheScraperFactory, configuredXCookies, createSourceMonitor, mergeCookieHeaders, retryAtFromRateLimit } from '../src/earlybird/sourceMonitor.js';
+import { startupPollDelay } from '../src/earlybird/sourcePollTiming.js';
+import { createMultimodalClient } from '../src/earlybird/aiPipeline.js';
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { assertGzhTypography, renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
@@ -48,6 +50,15 @@ describe('EarlyBird source monitor', () => {
     expect(retryAtFromRateLimit({ name: 'AuthError', resetAt: 2_000 }, 1_000)).toBeNull();
   });
 
+  it('merges an imported Netscape cookie export over the configured header', async () => {
+    expect(mergeCookieHeaders('auth_token=old; ct0=old', 'auth_token=new; lang=zh')).toBe('auth_token=new; ct0=old; lang=zh');
+    await expect(configuredXCookies({
+      cookieHeader: 'auth_token=old; ct0=old',
+      cookieFile: '/cookies.txt',
+      readFileImpl: async () => '.x.com\tTRUE\t/\tTRUE\t0\tauth_token\tnew\n.x.com\tTRUE\t/\tTRUE\t0\tlang\tzh',
+    })).resolves.toBe('auth_token=new; ct0=old; lang=zh');
+  });
+
   it('seeds the configured AI sources with their official websites', async () => {
     const prisma = prismaFixture();
     const monitor = createSourceMonitor({ prisma, scraperFactory: vi.fn() });
@@ -93,6 +104,14 @@ describe('EarlyBird source monitor', () => {
     expect(prisma.earlyBirdSource.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ lastError: 'source poll timed out after 1ms' }),
     }));
+  });
+});
+
+describe('EarlyBird source timing', () => {
+  it('spreads rate-limited sources over a five-minute recovery window', () => {
+    const source = { pollIntervalSeconds: 300, lastError: 'X rate limited until 2026-09-05T09:00:00.000Z' };
+    expect(startupPollDelay(source, { index: 0, total: 10, now: Date.parse('2026-09-05T08:55:00.000Z'), random: () => 0 })).toBe(300000);
+    expect(startupPollDelay(source, { index: 9, total: 10, now: Date.parse('2026-09-05T08:55:00.000Z'), random: () => 0.5 })).toBe(585000);
   });
 });
 
@@ -357,5 +376,25 @@ describe('WeChat client', () => {
     expect(fetchImpl.mock.calls.filter(([url]) => url.includes('/cgi-bin/token'))).toHaveLength(1);
     expect(calls.some(call => call.url.includes('/draft/add'))).toBe(true);
     expect(calls.some(call => call.url.includes('/draft/delete'))).toBe(true);
+  });
+});
+
+describe('multimodal fallback', () => {
+  it('uses the backup OpenAI-compatible provider after the primary provider fails', async () => {
+    const fetchImpl = vi.fn(async url => {
+      if (url.startsWith('https://primary.test')) return new Response(JSON.stringify({ error: { message: 'primary unavailable' } }), { status: 503 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"publish":true}' } }] }), { status: 200 });
+    });
+    const client = createMultimodalClient({
+      apiKey: 'primary-key', baseUrl: 'https://primary.test/v1', model: 'primary-model',
+      fallbackApiKey: 'backup-key', fallbackBaseUrl: 'https://backup.test/v1', fallbackModel: 'backup-model',
+      fetchImpl, maxAttempts: 1,
+    });
+
+    await expect(client.complete({ system: 'system', user: 'user' })).resolves.toEqual({ publish: true });
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      'https://primary.test/v1/chat/completions',
+      'https://backup.test/v1/chat/completions',
+    ]);
   });
 });

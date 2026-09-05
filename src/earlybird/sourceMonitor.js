@@ -1,4 +1,6 @@
 import { DEFAULT_SOURCES, comparePosts } from './utils.js';
+import { readFile } from 'node:fs/promises';
+import { normalizeCookies } from '../scrapers/twitter/http/accountPool.js';
 
 function withTimeout(promise, timeoutMs) {
   let timer;
@@ -32,6 +34,26 @@ export function retryAtFromRateLimit(error, now = Date.now()) {
   return error?.name === 'RateLimitError' && Number.isFinite(resetAt) && resetAt > now ? resetAt : null;
 }
 
+export function mergeCookieHeaders(...headers) {
+  const cookies = new Map();
+  for (const header of headers.filter(Boolean)) {
+    for (const entry of header.split(';')) {
+      const separator = entry.indexOf('=');
+      if (separator < 1) continue;
+      cookies.set(entry.slice(0, separator).trim(), entry.slice(separator + 1).trim());
+    }
+  }
+  return [...cookies.entries()].map(([name, value]) => `${name}=${value}`).join('; ');
+}
+
+export async function configuredXCookies({ cookieHeader = process.env.X_COOKIES || process.env.TWITTER_COOKIES, cookieFile = process.env.EARLYBIRD_X_COOKIES_FILE, readFileImpl = readFile } = {}) {
+  const importedCookies = cookieFile ? await readFileImpl(cookieFile, 'utf8') : '';
+  return mergeCookieHeaders(
+    cookieHeader ? normalizeCookies(cookieHeader) : '',
+    importedCookies ? normalizeCookies(importedCookies) : '',
+  );
+}
+
 function sourceErrorMessage(error) {
   const retryAt = retryAtFromRateLimit(error);
   if (retryAt) return `X rate limited until ${new Date(retryAt).toISOString()}`;
@@ -46,7 +68,7 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
         await prisma.earlyBirdSource.upsert({
           where: { handle: source.handle },
           update: {},
-          create: { ...source, pollIntervalSeconds: 60 },
+          create: { ...source, pollIntervalSeconds: 300 },
         });
       }
     },
@@ -105,7 +127,7 @@ export async function defaultScraperFactory() {
   const { createHttpScraper } = await import('../scrapers/twitter/http/index.js');
   const requestTimeoutMs = Number(process.env.EARLYBIRD_X_REQUEST_TIMEOUT_MS || 12000);
   return createHttpScraper({
-    cookies: process.env.X_COOKIES || process.env.TWITTER_COOKIES,
+    cookies: await configuredXCookies(),
     proxy: process.env.EARLYBIRD_X_PROXY || undefined,
     rateLimitStrategy: 'error',
     maxRetries: Number(process.env.EARLYBIRD_X_MAX_RETRIES || 1),

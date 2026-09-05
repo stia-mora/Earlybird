@@ -10,10 +10,11 @@ function extractJson(text) {
   }
 }
 
-export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY, baseUrl = process.env.EARLYBIRD_LLM_BASE_URL || 'https://api.openai.com/v1', model = process.env.EARLYBIRD_LLM_MODEL || 'gpt-4o-mini', fetchImpl = globalThis.fetch, timeoutMs = 180000, maxAttempts = 3, maxTokens = Number(process.env.EARLYBIRD_LLM_MAX_TOKENS || 4096) } = {}) {
+export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY, baseUrl = process.env.EARLYBIRD_LLM_BASE_URL || 'https://api.openai.com/v1', model = process.env.EARLYBIRD_LLM_MODEL || 'gpt-4o-mini', fallbackApiKey = process.env.EARLYBIRD_LLM_FALLBACK_API_KEY, fallbackBaseUrl = process.env.EARLYBIRD_LLM_FALLBACK_BASE_URL, fallbackModel = process.env.EARLYBIRD_LLM_FALLBACK_MODEL || model, fetchImpl = globalThis.fetch, timeoutMs = 180000, maxAttempts = 3, maxTokens = Number(process.env.EARLYBIRD_LLM_MAX_TOKENS || 4096) } = {}) {
+  const providers = [{ apiKey, baseUrl, model }, ...(fallbackApiKey && fallbackBaseUrl ? [{ apiKey: fallbackApiKey, baseUrl: fallbackBaseUrl, model: fallbackModel }] : [])];
   return {
     async complete({ system, user, images = [], maxOutputTokens = maxTokens }) {
-      if (!apiKey) throw new Error('EARLYBIRD_LLM_API_KEY is not configured');
+      if (!providers[0].apiKey) throw new Error('EARLYBIRD_LLM_API_KEY is not configured');
       const content = [{ type: 'text', text: user }];
       for (const image of images) {
         const buffer = image.data || await readFile(image.path);
@@ -21,18 +22,20 @@ export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_
         content.push({ type: 'image_url', image_url: { url: `data:${mime};base64,${Buffer.from(buffer).toString('base64')}` } });
       }
       let lastError;
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-          const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }, signal: controller.signal, body: JSON.stringify({ model, temperature: 0.4, max_tokens: maxOutputTokens, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content }] }) });
-          const payload = await response.json();
-          if (!response.ok || payload.error) throw new Error(payload.error?.message || `LLM request failed (${response.status})`);
-          return extractJson(payload.choices?.[0]?.message?.content || '');
-        } catch (error) {
-          lastError = error;
-          if (attempt < maxAttempts) await new Promise(resolve => setTimeout(resolve, 500 * 2 ** (attempt - 1)));
-        } finally { clearTimeout(timer); }
+      for (const provider of providers) {
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          try {
+            const response = await fetchImpl(`${provider.baseUrl.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${provider.apiKey}` }, signal: controller.signal, body: JSON.stringify({ model: provider.model, temperature: 0.4, max_tokens: maxOutputTokens, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content }] }) });
+            const payload = await response.json();
+            if (!response.ok || payload.error) throw new Error(payload.error?.message || `LLM request failed (${response.status})`);
+            return extractJson(payload.choices?.[0]?.message?.content || '');
+          } catch (error) {
+            lastError = error;
+            if (attempt < maxAttempts) await new Promise(resolve => setTimeout(resolve, 500 * 2 ** (attempt - 1)));
+          } finally { clearTimeout(timer); }
+        }
       }
       throw lastError;
     },

@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { createArticlePipeline } from './pipeline.js';
 import { cacheScraperFactory, createSourceMonitor, defaultScraperFactory, retryAtFromRateLimit } from './sourceMonitor.js';
 import { enqueueInterruptedJobs } from './jobRecovery.js';
+import { pollIntervalMs, startupPollDelay } from './sourcePollTiming.js';
 
 const redisUrl = process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`;
 const prisma = new PrismaClient();
@@ -58,7 +59,7 @@ async function pollSourceWithRetry(sourceId) {
 async function scheduleNextSourcePoll(sourceId, startedAt, rateLimitedUntil = null) {
   const source = await prisma.earlyBirdSource.findUnique({ where: { id: sourceId } });
   if (!source?.enabled) return;
-  const every = Math.max(15000, source.pollIntervalSeconds * 1000);
+  const every = pollIntervalMs(source);
   const regularDelay = Math.max(0, every - (Date.now() - startedAt));
   const rateLimitDelay = rateLimitedUntil ? Math.max(0, rateLimitedUntil - Date.now()) : 0;
   await enqueueSourcePoll(source, Math.max(regularDelay, rateLimitDelay));
@@ -92,14 +93,15 @@ monitorQueue.process('poll', Number(process.env.EARLYBIRD_SOURCE_CONCURRENCY || 
 
 async function scheduleSources() {
   const sources = await prisma.earlyBirdSource.findMany({ where: { enabled: true } });
-  const scheduled = new Set((await monitorQueue.getJobs(['waiting', 'delayed', 'active']))
-    .filter(job => job.name === 'poll' && job.data?.sourceId)
-    .map(job => job.data.sourceId));
+  const active = new Set();
+  for (const job of await monitorQueue.getJobs(['waiting', 'delayed', 'active'])) {
+    if (job.name !== 'poll' || !job.data?.sourceId) continue;
+    if (await job.getState() === 'active') active.add(job.data.sourceId);
+    else await job.remove();
+  }
   for (const [index, source] of sources.entries()) {
-    if (scheduled.has(source.id)) continue;
-    const every = Math.max(15000, source.pollIntervalSeconds * 1000);
-    const staggerMs = Math.max(1000, Math.floor(every / sources.length));
-    await enqueueSourcePoll(source, 1000 + index * staggerMs);
+    if (active.has(source.id)) continue;
+    await enqueueSourcePoll(source, startupPollDelay(source, { index, total: sources.length }));
   }
 }
 await scheduleSources();

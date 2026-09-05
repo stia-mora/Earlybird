@@ -42,7 +42,7 @@ router.post('/sources', async (req, res) => {
     const handle = String(req.body.handle || '').replace(/^@/, '').trim().toLowerCase();
     if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) return res.status(400).json({ error: 'handle must be 1-15 letters, digits, or underscores' });
     if (!validWebsite(req.body.website)) return res.status(400).json({ error: 'website must be an HTTPS URL' });
-    const source = await prisma.earlyBirdSource.create({ data: { handle, displayName: req.body.displayName, website: req.body.website || null, enabled: req.body.enabled !== false, pollIntervalSeconds: Math.max(15, Number(req.body.pollIntervalSeconds || 60)) } });
+    const source = await prisma.earlyBirdSource.create({ data: { handle, displayName: req.body.displayName, website: req.body.website || null, enabled: req.body.enabled !== false, pollIntervalSeconds: Math.max(15, Number(req.body.pollIntervalSeconds || 300)) } });
     res.status(201).json(source);
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
