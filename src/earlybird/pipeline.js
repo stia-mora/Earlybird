@@ -27,6 +27,14 @@ function configuredNumber(name, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+async function collectAssets({ prisma, mediaPipeline, post, thread }) {
+  const collected = await mediaPipeline.collect({ post, thread });
+  if (!prisma?.earlyBirdAsset?.findMany) return collected;
+  const stored = await prisma.earlyBirdAsset.findMany({ where: { postId: post.id, localPath: { not: null } } });
+  const known = new Set(collected.map(asset => asset.id || `${asset.sourceUrl}:${asset.localPath}`));
+  return [...collected, ...stored.filter(asset => !known.has(asset.id || `${asset.sourceUrl}:${asset.localPath}`))];
+}
+
 export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, logger = console } = {}) {
   const writer = createArticleWriter({ client: llmClient });
   return {
@@ -75,13 +83,13 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         }
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'captured', metadata: editorialMetadata } });
         const evidencePath = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', `${job.post.postId}-evidence.png`);
-        const assets = await mediaPipeline.collect({ post: job.post, thread });
+        const assets = await collectAssets({ prisma, mediaPipeline, post: job.post, thread });
         const relatedAssets = [];
         for (const relatedPost of relatedPosts) {
           const relatedThread = Array.isArray(relatedPost.threadData) && relatedPost.threadData.length
             ? relatedPost.threadData
             : [relatedPost.rawData];
-          relatedAssets.push(...await mediaPipeline.collect({ post: relatedPost, thread: relatedThread }));
+          relatedAssets.push(...await collectAssets({ prisma, mediaPipeline, post: relatedPost, thread: relatedThread }));
         }
         const websites = [...new Set([...storyPosts.map(item => item.source?.website), job.source.website].filter(Boolean))];
         const research = editorial.contentType === 'brief'

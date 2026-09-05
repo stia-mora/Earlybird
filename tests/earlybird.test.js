@@ -194,6 +194,7 @@ describe('event story pipeline', () => {
     const related = { id: 'p2', postId: '2', authorUsername: 'geminiapp', sourceUrl: 'https://x.com/geminiapp/status/2', text: 'Related official detail', rawData: { id: '2', text: 'Related official detail' }, createdAt: new Date('2026-09-05T00:10:00Z'), source: { handle: 'geminiapp', website: 'https://gemini.google.com' }, jobs: [] };
     const job = { id: 'j1', status: 'detected', metadata: null, detectedAt: new Date('2026-09-05T00:20:00Z'), postId: post.id, sourceId: 's1', post, source: { handle: 'openai', website: 'https://openai.com' }, draft: null };
     const updates = [];
+    const videoAsset = { id: 'a1', postId: post.id, kind: 'video', sourceUrl: 'https://x.com/video', localPath: 'video.mp4', metadata: { posterPath: 'poster.jpg', keyframes: ['frame-1.jpg'] } };
     const prisma = {
       earlyBirdArticleJob: {
         findUnique: vi.fn(async () => job),
@@ -204,12 +205,15 @@ describe('event story pipeline', () => {
         update: vi.fn(async () => post),
         findMany: vi.fn(async () => [related]),
       },
+      earlyBirdAsset: {
+        findMany: vi.fn(async ({ where }) => where.postId === post.id ? [videoAsset] : []),
+      },
     };
     const collect = vi.fn(async ({ post: target }) => []);
     const llmClient = { complete: vi.fn(async ({ system }) => {
       if (system.includes('微信公众号总编辑')) return { publish: true, contentType: 'event', newsworthiness: 90, relatedPostIds: ['p2'], reason: '同一发布事件', searchQueries: [] };
       const detail = '两条官方动态构成同一事件，并提供了明确的发布范围与后续观察线索。'.repeat(35);
-      const markdown = `事实钩子。\n\n## 第一条线索\n\n${detail}\n\n### 发布范围\n\n${detail}\n\n## 接下来要看什么\n\n${detail}`;
+      const markdown = `事实钩子。\n\n## 第一条线索\n\n${detail}\n\n![视频封面](poster.jpg)\n\n### 发布范围\n\n${detail}\n\n## 接下来要看什么\n\n${detail}`;
       if (system.includes('Humanizer-zh')) return { markdown, score: 48 };
       return { title: '合并后的官方动态', digest: '两条官方动态构成同一事件。', markdown };
     }) };
@@ -229,6 +233,7 @@ describe('event story pipeline', () => {
       expect(result.status).toBe('rendered');
       expect(collect).toHaveBeenCalledWith(expect.objectContaining({ post }));
       expect(collect).toHaveBeenCalledWith(expect.objectContaining({ post: related }));
+      expect(prisma.earlyBirdAsset.findMany).toHaveBeenCalledWith({ where: { postId: post.id, localPath: { not: null } } });
       expect(prisma.earlyBirdPost.findMany).toHaveBeenCalledWith(expect.objectContaining({
         where: expect.objectContaining({ createdAt: { gte: new Date('2026-09-04T23:20:00Z'), lte: new Date('2026-09-05T00:20:00Z') } }),
       }));
