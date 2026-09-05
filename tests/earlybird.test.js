@@ -110,8 +110,10 @@ describe('editorial triage', () => {
 
   it('allows only the configured Tibo Codex reset or model-support brief', () => {
     const allowed = normalizeEditorialDecision({ publish: true, contentType: 'brief', newsworthiness: 90, reason: '产品变更' }, { post: tiboPost, source });
+    const bankedReset = normalizeEditorialDecision({ publish: true, contentType: 'explainer', newsworthiness: 90, reason: '配额补偿' }, { post: { ...tiboPost, text: 'A banked reset lands today.' }, source });
     const denied = normalizeEditorialDecision({ publish: true, contentType: 'brief', newsworthiness: 90 }, { post: { ...tiboPost, text: 'A nice day at OpenAI.' }, source });
     expect(allowed.contentType).toBe('brief');
+    expect(bankedReset.contentType).toBe('brief');
     expect(denied.contentType).toBe('ignore');
   });
 

@@ -6,9 +6,9 @@ export function isConversationPost(post = {}) {
   return Boolean(raw.inReplyTo || raw.inReplyToStatusId || raw.inReplyToStatusIdStr || raw.inReplyToScreenName || raw.replyTo || raw.isReply);
 }
 
-export function isTiboBriefEligible(post = {}) {
-  const text = [post.text, post.rawData?.text, ...(post.threadData || []).map(item => item?.text)].filter(Boolean).join(' ').toLowerCase();
-  const reset = /(?:codex.{0,28}\breset\b|\breset\b.{0,28}codex|codex.{0,28}重置|重置.{0,28}codex)/i;
+export function isTiboBriefEligible(post = {}, thread = []) {
+  const text = [post.text, post.rawData?.text, ...(post.threadData || []).map(item => item?.text), ...thread.map(item => item?.text)].filter(Boolean).join(' ').toLowerCase();
+  const reset = /(?:codex.{0,28}\breset\b|\breset\b.{0,28}codex|codex.{0,28}重置|重置.{0,28}codex|\bbanked reset\b)/i;
   const modelSupport = /(?:\bcodex\b|codex)(?=[\s\S]{0,160}(?:chatgpt|gpt[-\s]?\d|新模型|new model))(?=[\s\S]{0,160}(?:support|compatible|works|适配|支持|兼容|可用))/i;
   return reset.test(text) || modelSupport.test(text);
 }
@@ -29,7 +29,7 @@ export function recentPostSummary(post) {
   };
 }
 
-export function normalizeEditorialDecision(decision, { post, source, recentPosts = [] } = {}) {
+export function normalizeEditorialDecision(decision, { post, source, thread = [], recentPosts = [] } = {}) {
   const handle = String(source?.handle || post?.authorUsername || '').toLowerCase();
   const candidateIds = new Set(recentPosts.map(item => item.id));
   const type = CONTENT_TYPES.has(decision?.contentType) ? decision.contentType : 'ignore';
@@ -41,7 +41,7 @@ export function normalizeEditorialDecision(decision, { post, source, recentPosts
   if (isConversationPost(post)) return { contentType: 'ignore', publish: false, reason: '回复、评论或对话内容不自动成文。', newsworthiness: score, relatedPostIds: [], searchQueries: [] };
   if (!publish || type === 'ignore') return { contentType: 'ignore', publish: false, reason: shortText(decision?.reason || '信息密度或独立新闻价值不足。', 300), newsworthiness: score, relatedPostIds: [], searchQueries: [] };
   if (handle === TIBO_HANDLE) {
-    if (!isTiboBriefEligible(post)) return { contentType: 'ignore', publish: false, reason: 'Tibo 暂时只收录 Codex 重置或 Codex 适配 ChatGPT 新模型消息。', newsworthiness: score, relatedPostIds: [], searchQueries: [] };
+    if (!isTiboBriefEligible(post, thread)) return { contentType: 'ignore', publish: false, reason: 'Tibo 暂时只收录 Codex 重置或 Codex 适配 ChatGPT 新模型消息。', newsworthiness: score, relatedPostIds: [], searchQueries: [] };
     return { contentType: 'brief', publish: true, reason: shortText(decision?.reason, 300), newsworthiness: score, eventKey: null, relatedPostIds: [], searchQueries: [] };
   }
   if (type === 'brief') return { contentType: 'ignore', publish: false, reason: '快讯当前仅允许 Tibo 的受限 Codex 消息。', newsworthiness: score, relatedPostIds: [], searchQueries: [] };
@@ -60,7 +60,7 @@ export function normalizeEditorialDecision(decision, { post, source, recentPosts
 }
 
 export async function classifyEditorial({ client, post, source, thread = [], recentPosts = [] } = {}) {
-  if (!client) return normalizeEditorialDecision(null, { post, source, recentPosts });
+  if (!client) return normalizeEditorialDecision(null, { post, source, thread, recentPosts });
   const candidatePosts = recentPosts.map(recentPostSummary);
   const decision = await client.complete({
     system: `你是微信公众号总编辑，只做选题判别，不写正文。只返回 JSON：publish、contentType、newsworthiness、reason、eventKey、relatedPostIds、searchQueries。contentType 只能是 ignore、brief、explainer、event。
@@ -73,5 +73,5 @@ export async function classifyEditorial({ client, post, source, thread = [], rec
       recentCandidates: candidatePosts,
     }),
   });
-  return normalizeEditorialDecision(decision, { post, source, recentPosts });
+  return normalizeEditorialDecision(decision, { post, source, thread, recentPosts });
 }

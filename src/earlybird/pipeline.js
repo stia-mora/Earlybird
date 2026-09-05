@@ -9,7 +9,6 @@ import { createArticleWriter } from './articleWriter.js';
 import { createWeChatClient } from './wechatClient.js';
 import { classifyEditorial } from './editorialClassifier.js';
 import { collectResearchImages, researchOfficialSources } from './researchBrowser.js';
-import { DEFAULT_SOURCES } from './utils.js';
 
 const MERGEABLE_STATUSES = ['detected', 'classified', 'held', 'captured', 'failed'];
 
@@ -88,7 +87,7 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
             : [relatedPost.rawData];
           relatedAssets.push(...await mediaPipeline.collect({ post: relatedPost, thread: relatedThread }));
         }
-        const websites = [...new Set([...DEFAULT_SOURCES.map(source => source.website), ...storyPosts.map(item => item.source?.website), job.source.website].filter(Boolean))];
+        const websites = [...new Set([...storyPosts.map(item => item.source?.website), job.source.website].filter(Boolean))];
         const research = editorial.contentType === 'brief'
           ? { citations: [], images: [], queries: [], allowedHosts: [] }
           : await researchOfficialSources({ queries: editorial.searchQueries, websites, logger });
