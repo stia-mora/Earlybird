@@ -202,6 +202,10 @@ describe('thread assembly and humanizer', () => {
     expect(hasCompactPresentation(compact)).toBe(true);
     expect(compact.split('\n').every(line => !line.trim() || /^[-#]/.test(line) || line.length <= MAX_PARAGRAPH_LENGTH)).toBe(true);
   });
+  it('merges adjacent fragments into a complete reading paragraph', () => {
+    const compact = compactEditorialMarkdown('第一句话只交代了背景。\n\n第二句话补足了读者理解这件事所需的关键事实。');
+    expect(compact).toBe('第一句话只交代了背景。第二句话补足了读者理解这件事所需的关键事实。');
+  });
 });
 
 describe('Graphite renderer', () => {
@@ -238,6 +242,11 @@ describe('Graphite renderer', () => {
     expect(html).not.toContain('**');
     expect(() => assertGzhTypography(html)).not.toThrow();
     await expect(validateGzhHtml(html, { run: async () => '完全合规' })).resolves.toBe('完全合规');
+  });
+  it('uses semantic highlights sparingly instead of underlining every paragraph', async () => {
+    const html = await renderGzhMarkdown('这是一段普通的承接文字，用来交代事情仍在发展。\n\nOpenAI 表示将建立 AI 失配事件披露框架。\n\n这也是一段普通说明，帮助读者理解前后语境。', { contentType: 'explainer' });
+    expect((html.match(/border-bottom:2px/g) || []).length).toBe(1);
+    expect(html).toContain('AI 失配事件');
   });
   it('blocks raw Markdown emphasis that reaches the final HTML', async () => {
     await expect(validateGzhHtml('<section><p style="font-size:15px;">**不应出现**</p></section>', { run: async () => '完全合规' })).rejects.toThrow('raw Markdown emphasis');

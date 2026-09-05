@@ -50,26 +50,35 @@ export function assertGzhTypography(html) {
   }
 }
 
-function markKeywords(text) {
-  const plain = fullWidthPunctuation(text).trim();
-  if (!plain) return '';
-  const match = plain.match(/[\u4e00-\u9fff]{4,12}/)?.[0] || plain.split(/\s+/).slice(0, 3).join(' ');
-  const index = plain.indexOf(match);
-  if (index < 0) return `<span leaf="">${escapeHtml(plain)}</span>`;
-  return `<span leaf="">${escapeHtml(plain.slice(0, index))}</span><span style="border-bottom:2px solid #52525B;font-weight:600;"><span leaf="">${escapeHtml(match)}</span></span><span leaf="">${escapeHtml(plain.slice(index + match.length))}</span>`;
+const HIGHLIGHT_PATTERNS = [
+  /(?:AI\s*失配(?:事件)?|失配事件披露框架|安全事件响应|代理系统|模型部署|监管机构|开源模型|推理能力|上下文窗口|训练数据|开发者工具)/i,
+  /(?:20\d{2}年(?:\d{1,2}月(?:\d{1,2}日)?)?|[\d,.]+(?:万|亿|％|%|次|家|项|天|小时|分钟|倍))/,
+  /\b(?:OpenAI|Anthropic|Google(?:\s+DeepMind)?|DeepMind|xAI|Hugging Face|ChatGPT|Codex|Claude|Gemini|Grok|GPT(?:-\d+(?:\.\d+)?)?)\b/i,
+];
+
+function plainText(text) {
+  return fullWidthPunctuation(String(text).replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1')).trim();
 }
 
-function inline(text) {
-  const withoutLinks = String(text).replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1');
-  let value = escapeHtml(fullWidthPunctuation(withoutLinks));
-  value = value.replace(/\*\*(.+?)\*\*/g, '<strong><span leaf="">$1</span></strong>');
-  if (value.includes('<')) {
-    return value.replace(/(^|>)([^<]+)(?=<|$)/g, (match, prefix, text) => {
-      if (!/[\u4e00-\u9fff]/.test(text) || text.includes('leaf=')) return match;
-      return `${prefix}${markKeywords(text)}`;
-    });
+function findHighlightPhrase(text) {
+  const plain = plainText(text);
+  for (const pattern of HIGHLIGHT_PATTERNS) {
+    const match = plain.match(pattern)?.[0];
+    if (match) return match;
   }
-  return markKeywords(value);
+  return '';
+}
+
+function markKeywords(text, emphasis = '') {
+  const plain = plainText(text);
+  if (!plain || !emphasis) return `<span leaf="">${escapeHtml(plain)}</span>`;
+  const index = plain.indexOf(emphasis);
+  if (index < 0) return `<span leaf="">${escapeHtml(plain)}</span>`;
+  return `<span leaf="">${escapeHtml(plain.slice(0, index))}</span><span style="border-bottom:2px solid #52525B;font-weight:600;"><span leaf="">${escapeHtml(emphasis)}</span></span><span leaf="">${escapeHtml(plain.slice(index + emphasis.length))}</span>`;
+}
+
+function inline(text, emphasis = '') {
+  return markKeywords(text, emphasis);
 }
 
 function referenceUrls(references) {
@@ -105,6 +114,7 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
   if (safeTitle) html += `<h1 style="font-size:24px;line-height:1.4;color:#27272A;margin:24px 10px 12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(safeTitle))}</span></h1>`;
   if (safeDigest) html += `<p style="font-size:16px;color:#3F3F46;margin:0 10px 24px;border-left:3px solid #52525B;padding-left:12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(safeDigest))}</span></p>`;
   let headingNumber = 0;
+  let highlightBudget = contentType === 'brief' ? 2 : 5;
   sections.forEach((section, index) => {
     html += `<section style="margin-top:${index ? 56 : 16}px;margin-bottom:28px;padding:0 10px;">`;
     if (section.title) { headingNumber += 1; html += `<section style="padding-bottom:14px;border-bottom:1px solid #E4E4E7;"><p style="font-size:42px;font-weight:900;color:#E4E4E7;margin:0;line-height:1;"><span leaf="">${String(headingNumber).padStart(2, '0')}</span></p><h3 style="font-size:20px;font-weight:800;color:#27272A;margin:0;line-height:1.4;"><span leaf="">${escapeHtml(fullWidthPunctuation(section.title))}</span></h3></section>`; }
@@ -114,9 +124,17 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
         html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(compactEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' '))}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
         continue;
       }
-      if (/^[-*]\s+/.test(item)) { html += `<p style="${BODY}padding-left:14px;"> <span leaf="">• </span>${inline(item.replace(/^[-*]\s+/, ''))}</p>`; continue; }
+      if (/^[-*]\s+/.test(item)) {
+        const listText = item.replace(/^[-*]\s+/, '');
+        const emphasis = highlightBudget > 0 ? findHighlightPhrase(listText) : '';
+        if (emphasis) highlightBudget -= 1;
+        html += `<p style="${BODY}padding-left:14px;"> <span leaf="">• </span>${inline(listText, emphasis)}</p>`;
+        continue;
+      }
       if (/^>\s?/.test(item)) { html += `<p style="${BODY}border-left:3px solid #52525B;padding-left:12px;color:#3F3F46;"><span leaf="">${escapeHtml(fullWidthPunctuation(item.replace(/^>\s?/, '')))}</span></p>`; continue; }
-      html += `<p style="${BODY}">${inline(item)}</p>`;
+      const emphasis = highlightBudget > 0 ? findHighlightPhrase(item) : '';
+      if (emphasis) highlightBudget -= 1;
+      html += `<p style="${BODY}">${inline(item, emphasis)}</p>`;
     }
     html += '</section>';
   });
