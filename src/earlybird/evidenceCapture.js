@@ -45,16 +45,15 @@ async function ensureTweetVideoFrame(card, mediaPosterPath) {
     await card.evaluate((element, source) => {
       const player = element.querySelector('[data-testid="videoPlayer"]');
       if (!player) return;
-      const container = player.parentElement;
-      if (!container) return;
-      container.style.position = 'relative';
-      container.querySelector('[data-earlybird-video-frame="true"]')?.remove();
+      player.style.position = 'relative';
+      player.style.overflow = 'hidden';
+      player.querySelector('[data-earlybird-video-frame="true"]')?.remove();
       const image = document.createElement('img');
       image.dataset.earlybirdVideoFrame = 'true';
       image.src = source;
       image.alt = 'X 视频首帧';
-      image.style.cssText = 'position:absolute;inset:0;z-index:2;display:block;width:100%;height:100%;object-fit:cover;background:#000;';
-      container.append(image);
+      image.style.cssText = 'position:absolute;inset:0;z-index:2147483647;display:block;width:100%;height:100%;object-fit:cover;background:#000;';
+      player.append(image);
     }, dataUrl);
     return;
   }
