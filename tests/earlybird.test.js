@@ -268,6 +268,7 @@ describe('editorial triage', () => {
     await classifyEditorial({ client, post: tiboPost, source, recentPosts: [{ id: 'p2', authorUsername: 'openai', text: 'candidate' }] });
     const payload = JSON.parse(client.complete.mock.calls[0][0].user);
     expect(payload.recentCandidates).toEqual([expect.objectContaining({ id: 'p2', text: 'candidate' })]);
+    expect(client.complete.mock.calls[0][0].system).toContain('判别必须自洽');
   });
 });
 
