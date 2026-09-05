@@ -62,6 +62,21 @@ describe('EarlyBird source monitor', () => {
       data: expect.objectContaining({ baselineComplete: true }),
     }));
   });
+
+  it('times out a stalled source poll and records the failure', async () => {
+    const prisma = prismaFixture();
+    const monitor = createSourceMonitor({
+      prisma,
+      pollTimeoutMs: 1,
+      logger: { error: vi.fn() },
+      scraperFactory: async () => ({ scrapeTweets: async () => new Promise(() => {}) }),
+    });
+
+    await expect(monitor.pollSource('s1')).rejects.toThrow('source poll timed out after 1ms');
+    expect(prisma.earlyBirdSource.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ lastError: 'source poll timed out after 1ms' }),
+    }));
+  });
 });
 
 describe('thread assembly and humanizer', () => {

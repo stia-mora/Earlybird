@@ -1,12 +1,20 @@
 import { DEFAULT_SOURCES, comparePosts } from './utils.js';
 
+function withTimeout(promise, timeoutMs) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`source poll timed out after ${timeoutMs}ms`)), timeoutMs); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function isNewer(post, source) {
   if (!source.lastSeenCreatedAt && !source.lastSeenPostId) return true;
   const seen = { createdAt: source.lastSeenCreatedAt, id: source.lastSeenPostId };
   return comparePosts(post, seen) > 0;
 }
 
-export function createSourceMonitor({ prisma, queue, scraperFactory, now = () => new Date(), logger = console } = {}) {
+export function createSourceMonitor({ prisma, queue, scraperFactory, now = () => new Date(), logger = console, pollTimeoutMs = Number(process.env.EARLYBIRD_SOURCE_POLL_TIMEOUT_MS || 30000) } = {}) {
   if (!prisma) throw new Error('source monitor requires prisma');
   return {
     async ensureDefaults() {
@@ -22,8 +30,8 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
       const source = await prisma.earlyBirdSource.findUnique({ where: { id: sourceId } });
       if (!source || !source.enabled) return { baseline: false, detected: 0 };
       try {
-        const scraper = await scraperFactory(source);
-        const posts = (await scraper.scrapeTweets(source.handle, { limit: 20, includeReplies: false })) || [];
+        const scraper = await withTimeout(scraperFactory(source), pollTimeoutMs);
+        const posts = (await withTimeout(scraper.scrapeTweets(source.handle, { limit: 20, includeReplies: false }), pollTimeoutMs)) || [];
         const ordered = [...posts].sort((a, b) => comparePosts(a, b));
         if (!source.baselineComplete) {
           const newest = ordered.at(-1);
@@ -70,9 +78,14 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
 
 export async function defaultScraperFactory() {
   const { createHttpScraper } = await import('../scrapers/twitter/http/index.js');
+  const requestTimeoutMs = Number(process.env.EARLYBIRD_X_REQUEST_TIMEOUT_MS || 12000);
   return createHttpScraper({
     cookies: process.env.X_COOKIES || process.env.TWITTER_COOKIES,
     proxy: process.env.EARLYBIRD_X_PROXY || undefined,
     rateLimitStrategy: 'wait',
+    fetch: (url, options = {}) => fetch(url, {
+      ...options,
+      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs),
+    }),
   });
 }

@@ -10,7 +10,12 @@ const monitorQueue = new Bull('earlybird-source-monitor', redisUrl, {
   limiter: { max: 1, duration: Number(process.env.EARLYBIRD_SOURCE_MIN_REQUEST_INTERVAL_MS || 5000) },
 });
 const pipeline = createArticlePipeline({ prisma, scraperFactory: defaultScraperFactory });
-const monitor = createSourceMonitor({ prisma, queue, scraperFactory: defaultScraperFactory });
+const monitor = createSourceMonitor({
+  prisma,
+  queue,
+  scraperFactory: defaultScraperFactory,
+  pollTimeoutMs: Number(process.env.EARLYBIRD_SOURCE_POLL_TIMEOUT_MS || 30000),
+});
 
 await monitor.ensureDefaults();
 queue.process('process', Number(process.env.EARLYBIRD_CONCURRENCY || 1), async job => {
@@ -31,7 +36,14 @@ monitorQueue.process('poll', async job => monitor.pollSource(job.data.sourceId))
 async function scheduleSources() {
   const sources = await prisma.earlyBirdSource.findMany({ where: { enabled: true } });
   for (const source of sources) {
-    await monitorQueue.add('poll', { sourceId: source.id }, { jobId: `earlybird-poll-${source.id}`, repeat: { every: Math.max(15000, source.pollIntervalSeconds * 1000) }, removeOnComplete: 10, removeOnFail: 20 });
+    await monitorQueue.add('poll', { sourceId: source.id }, {
+      jobId: `earlybird-poll-${source.id}`,
+      repeat: { every: Math.max(15000, source.pollIntervalSeconds * 1000) },
+      attempts: 2,
+      backoff: { type: 'fixed', delay: 10000 },
+      removeOnComplete: 10,
+      removeOnFail: 20,
+    });
   }
 }
 await scheduleSources();
