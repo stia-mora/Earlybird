@@ -153,6 +153,8 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', show
     assertTweetEvidence({ pageText, articleText });
     await expandTweetCard(shot);
     if (showTranslation) await addInlineTranslation(shot, translation);
+    await shot.evaluate(element => element.scrollIntoView({ block: 'start' }));
+    await new Promise(resolve => setTimeout(resolve, 100));
     await hideOverlappingPageChrome(shot);
     if (!mediaPosterPath) await waitForTweetVideoFrame(shot);
     const [cardBox, video] = await Promise.all([
