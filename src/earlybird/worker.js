@@ -2,6 +2,7 @@ import Bull from 'bull';
 import { PrismaClient } from '@prisma/client';
 import { createArticlePipeline } from './pipeline.js';
 import { cacheScraperFactory, createSourceMonitor, defaultScraperFactory, retryAtFromRateLimit } from './sourceMonitor.js';
+import { enqueueInterruptedJobs } from './jobRecovery.js';
 
 const redisUrl = process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`;
 const prisma = new PrismaClient();
@@ -102,6 +103,8 @@ async function scheduleSources() {
   }
 }
 await scheduleSources();
+const recoveredJobs = await enqueueInterruptedJobs({ prisma, queue });
+if (recoveredJobs) console.warn(`EarlyBird recovered ${recoveredJobs} interrupted article job(s)`);
 console.log(`EarlyBird worker ready (${await prisma.earlyBirdSource.count()} sources)`);
 
 process.on('SIGTERM', async () => { await queue.close(); await monitorQueue.close(); await prisma.$disconnect(); process.exit(0); });

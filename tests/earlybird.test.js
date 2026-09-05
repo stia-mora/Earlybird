@@ -11,6 +11,7 @@ import { isOfficialUrl, normalizeSearchQueries, officialHosts } from '../src/ear
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline } from '../src/earlybird/pipeline.js';
 import { articleVisualAssets, compactEditorialMarkdown, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH } from '../src/earlybird/articleWriter.js';
+import { enqueueInterruptedJobs } from '../src/earlybird/jobRecovery.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -91,6 +92,31 @@ describe('EarlyBird source monitor', () => {
     await expect(monitor.pollSource('s1')).rejects.toThrow('source poll timed out after 1ms');
     expect(prisma.earlyBirdSource.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ lastError: 'source poll timed out after 1ms' }),
+    }));
+  });
+});
+
+describe('EarlyBird job recovery', () => {
+  it('requeues only jobs interrupted by a worker termination', async () => {
+    const prisma = {
+      earlyBirdArticleJob: {
+        findMany: vi.fn(async () => [{ id: 'j1' }, { id: 'j2' }]),
+      },
+    };
+    const queue = { add: vi.fn(async () => {}) };
+
+    const recovered = await enqueueInterruptedJobs({ prisma, queue, now: () => 1000 });
+
+    expect(recovered).toBe(2);
+    expect(prisma.earlyBirdArticleJob.findMany).toHaveBeenCalledWith({
+      where: { status: 'failed', error: { contains: 'terminated', mode: 'insensitive' } },
+      select: { id: true },
+    });
+    expect(queue.add).toHaveBeenNthCalledWith(1, 'process', { jobId: 'j1' }, expect.objectContaining({
+      jobId: 'earlybird-article-recovery-j1-1000', delay: 10000,
+    }));
+    expect(queue.add).toHaveBeenNthCalledWith(2, 'process', { jobId: 'j2' }, expect.objectContaining({
+      jobId: 'earlybird-article-recovery-j2-1000', delay: 11000,
     }));
   });
 });
