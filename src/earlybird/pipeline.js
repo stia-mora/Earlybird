@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { assembleThread } from './threadAssembler.js';
 import { analyzePost, createMultimodalClient } from './aiPipeline.js';
@@ -11,6 +11,7 @@ import { createWeChatClient } from './wechatClient.js';
 import { classifyEditorial } from './editorialClassifier.js';
 import { collectResearchImages, researchOfficialSources } from './researchBrowser.js';
 import { createHermesNotifier } from './hermesNotifier.js';
+import { writeEndVisualBrief } from './visualBrief.js';
 
 const MERGEABLE_STATUSES = ['detected', 'classified', 'held', 'captured', 'failed'];
 
@@ -162,6 +163,14 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const article = await writer.write({ post: job.post, thread, analysis, editorial, storyPosts, research: { ...research, assets: allAssets.filter(asset => asset.kind === 'image').map(asset => ({ path: asset.localPath, sourceUrl: asset.sourceUrl, altText: asset.metadata?.altText || '' })) }, assets: articleAssets, sourceUrl: job.post.sourceUrl });
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'written', markdown: article.markdown } });
         const polished = await humanize({ client: llmClient, markdown: article.markdown, context: { postId: job.post.postId, analysis, editorial, research: { queries: research.queries, citations: research.citations.map(citation => ({ title: citation.title, url: citation.url })) } } });
+        const visualBriefPath = await writeEndVisualBrief({
+          postId: job.post.postId,
+          title: article.title,
+          digest: article.digest,
+          contentType: editorial.contentType,
+          sourceHandle: job.source.handle,
+        });
+        analysisMetadata.visualBrief = { fileName: basename(visualBriefPath) };
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: polished.manualReview ? 'manual_review' : 'humanized', markdown: polished.markdown, humanizerScore: polished.score, metadata: analysisMetadata } });
         if (polished.manualReview) return prisma.earlyBirdArticleJob.findUnique({ where: { id: job.id } });
         const assetUrls = new Map();
@@ -179,9 +188,9 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
           if (uploaded.url) assetUrls.set(asset.localPath, uploaded.url);
           if (asset.assetId) await prisma.earlyBirdAsset.update({ where: { id: asset.assetId }, data: { wechatUrl: uploaded.url, status: 'uploaded' } });
         }
-        for (const asset of allAssets.filter(item => item.kind === 'video' && item.localPath)) {
-          const uploaded = await wechatClient.uploadPermanentMaterial(asset.localPath, 'video', { description: { title: `X 视频 ${job.post.postId}`, introduction: 'EarlyBird 视频素材，仅供草稿编辑使用。' } });
-          await prisma.earlyBirdAsset.update({ where: { id: asset.id }, data: { wechatMediaId: uploaded.media_id, status: 'uploaded' } });
+        const manualVideos = allAssets.filter(item => item.kind === 'video' && item.localPath);
+        for (const asset of manualVideos) {
+          await prisma.earlyBirdAsset.update({ where: { id: asset.id }, data: { wechatMediaId: null, status: 'manual_upload_required' } });
         }
         const markdownForRender = [...assetUrls.entries()].reduce((value, [localPath, url]) => value.replaceAll(localPath, url), polished.markdown);
         const html = await renderGzhMarkdown(markdownForRender, { title: article.title, digest: article.digest, contentType: editorial.contentType, references });
@@ -193,7 +202,7 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const storedDraft = await prisma.earlyBirdDraft.upsert({ where: { jobId: job.id }, update: { mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl } }, create: { jobId: job.id, mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl } } });
         const completedJob = await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'verified' } });
         try {
-          await notifier?.draftReady({ job: { ...job, ...completedJob, metadata: analysisMetadata }, draft: storedDraft, source: job.source, post: job.post });
+          await notifier?.draftReady({ job: { ...job, ...completedJob, metadata: analysisMetadata }, draft: storedDraft, source: job.source, post: job.post, manualVideoFiles: manualVideos.map(asset => basename(asset.localPath)) });
         } catch (notificationError) {
           logger.warn?.('EarlyBird draft notification failed', job.id, notificationError.message);
         }

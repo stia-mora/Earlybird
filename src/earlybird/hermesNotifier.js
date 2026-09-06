@@ -13,6 +13,7 @@ export function createHermesNotifier({
   fetchImpl = globalThis.fetch,
   now = () => new Date(),
   timeoutMs = Number(process.env.EARLYBIRD_HERMES_TIMEOUT_MS || 45000),
+  hostMediaDir = process.env.EARLYBIRD_HOST_MEDIA_DIR || '',
 } = {}) {
   const store = prisma?.earlyBirdNotification;
   let loadedToken = token || null;
@@ -57,16 +58,24 @@ export function createHermesNotifier({
   }
 
   return {
-    draftReady({ job, draft, source, post }) {
+    draftReady({ job, draft, source, post, manualVideoFiles = [] }) {
       const title = draft?.requestSummary?.title || '新公众号草稿';
       const contentType = job?.metadata?.editorial?.contentType || 'article';
       const handle = source?.handle || post?.authorUsername || 'unknown';
+      const videos = [...new Set(manualVideoFiles.filter(Boolean))];
+      const videoNotice = videos.length
+        ? `\n视频未自动上传至微信素材库，请审核后手动上传。\n目录：${hostMediaDir || '请在 EARLYBIRD_HOST_MEDIA_DIR 中配置宿主机目录'}\n文件：${videos.join('、')}`
+        : '';
+      const visualBrief = job?.metadata?.visualBrief?.fileName;
+      const visualNotice = visualBrief
+        ? `\n文末配图参考与生图提示词：${hostMediaDir || '媒体目录'}/${visualBrief}`
+        : '';
       return deliver({
         kind: 'draft_ready',
         dedupeKey: `draft:${job.id}`,
         subject: 'EarlyBird：公众号草稿已就绪',
-        message: `标题：${title}\n来源：@${handle}\n类型：${contentType}\n状态：已创建并通过微信草稿回读校验。`,
-        payload: { jobId: job.id, postId: post?.postId, source: handle, mediaId: draft?.mediaId },
+        message: `标题：${title}\n来源：@${handle}\n类型：${contentType}\n状态：已创建并通过微信草稿回读校验。${videoNotice}${visualNotice}`,
+        payload: { jobId: job.id, postId: post?.postId, source: handle, mediaId: draft?.mediaId, manualVideoFiles: videos, visualBrief },
       });
     },
     dailySummary(summary) {

@@ -78,6 +78,7 @@ services:
       WECHAT_AUTHOR: ${WECHAT_AUTHOR:-}
       EARLYBIRD_PUBLIC_MEDIA_URL: ${EARLYBIRD_PUBLIC_MEDIA_URL:-}
       EARLYBIRD_MEDIA_DIR: /app/data/earlybird/media
+      EARLYBIRD_HOST_MEDIA_DIR: "${EARLYBIRD_HOST_MEDIA_DIR:-E:/Group-projects/EarlyBird-Pulse/XActions/data/earlybird/media}"
       EARLYBIRD_THREAD_WAIT_MS: ${EARLYBIRD_THREAD_WAIT_MS:-90000}
       EARLYBIRD_THREAD_TIMEOUT_MS: ${EARLYBIRD_THREAD_TIMEOUT_MS:-60000}
       EARLYBIRD_EVENT_WINDOW_MINUTES: ${EARLYBIRD_EVENT_WINDOW_MINUTES:-60}
@@ -89,7 +90,7 @@ services:
       EARLYBIRD_HERMES_RELAY_TOKEN_FILE: /run/secrets/earlybird-hermes-relay-token
       EARLYBIRD_HERMES_TIMEOUT_MS: ${EARLYBIRD_HERMES_TIMEOUT_MS:-45000}
     volumes:
-      - earlybird_media:/app/data/earlybird/media
+      - ./data/earlybird/media:/app/data/earlybird/media
       - ./data/earlybird/x.com_cookies.txt:/run/secrets/earlybird-x-cookies.txt:ro
       - ./data/earlybird/hermes-relay.token:/run/secrets/earlybird-hermes-relay-token:ro
     extra_hosts:
@@ -163,6 +164,7 @@ services:
       WECHAT_AUTHOR: ${WECHAT_AUTHOR:-}
       EARLYBIRD_PUBLIC_MEDIA_URL: ${EARLYBIRD_PUBLIC_MEDIA_URL:-}
       EARLYBIRD_MEDIA_DIR: /app/data/earlybird/media
+      EARLYBIRD_HOST_MEDIA_DIR: "${EARLYBIRD_HOST_MEDIA_DIR:-E:/Group-projects/EarlyBird-Pulse/XActions/data/earlybird/media}"
       EARLYBIRD_THREAD_WAIT_MS: ${EARLYBIRD_THREAD_WAIT_MS:-90000}
       EARLYBIRD_THREAD_TIMEOUT_MS: ${EARLYBIRD_THREAD_TIMEOUT_MS:-60000}
       EARLYBIRD_EVENT_WINDOW_MINUTES: ${EARLYBIRD_EVENT_WINDOW_MINUTES:-60}
@@ -183,7 +185,7 @@ services:
       PUPPETEER_HEADLESS: "true"
       PUPPETEER_NO_SANDBOX: "true"
     volumes:
-      - earlybird_media:/app/data/earlybird/media
+      - ./data/earlybird/media:/app/data/earlybird/media
       - ./data/earlybird/x.com_cookies.txt:/run/secrets/earlybird-x-cookies.txt:ro
       - ./data/earlybird/hermes-relay.token:/run/secrets/earlybird-hermes-relay-token:ro
     extra_hosts:
@@ -206,4 +208,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  earlybird_media:

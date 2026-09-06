@@ -98,7 +98,7 @@ function normalizedTitle(value) {
 
 export async function renderGzhMarkdown(markdown, { title, digest, contentType, references = [] } = {}) {
   await loadGzhSources();
-  const lines = sanitizeEditorialMarkdown(markdown).split('\n');
+  const lines = sanitizeEditorialMarkdown(markdown, { preserveParagraphs: true }).split('\n');
   const safeTitle = sanitizeEditorialMarkdown(title).replace(/\s*\n\s*/g, ' ');
   const safeDigest = sanitizeEditorialMarkdown(digest).replace(/\s*\n\s*/g, ' ');
   const displayDigest = normalizedTitle(safeDigest) === normalizedTitle(safeTitle) ? '' : safeDigest;

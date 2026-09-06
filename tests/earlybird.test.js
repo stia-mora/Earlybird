@@ -8,15 +8,16 @@ import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { assertGzhTypography, renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
 import { createWeChatClient } from '../src/earlybird/wechatClient.js';
-import { comparePosts, DEFAULT_SOURCES } from '../src/earlybird/utils.js';
+import { comparePosts, DEFAULT_SOURCES, fullWidthPunctuation } from '../src/earlybird/utils.js';
 import { classifyEditorial, normalizeEditorialDecision } from '../src/earlybird/editorialClassifier.js';
 import { isOfficialUrl, normalizeSearchQueries, officialHosts } from '../src/earlybird/researchBrowser.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline } from '../src/earlybird/pipeline.js';
-import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH, sanitizeEditorialMarkdown } from '../src/earlybird/articleWriter.js';
+import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH, sanitizeEditorialMarkdown, varyEditorialParagraphs } from '../src/earlybird/articleWriter.js';
 import { enqueueInterruptedJobs } from '../src/earlybird/jobRecovery.js';
 import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
+import { buildEndVisualBrief } from '../src/earlybird/visualBrief.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -160,6 +161,23 @@ describe('EarlyBird Hermes notifications', () => {
     }));
   });
 
+  it('tells the editor where to manually upload downloaded videos', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, text: async () => '{"status":"sent"}' }));
+    const notifier = createHermesNotifier({ url: 'http://relay/notify', token: 'test-token', hostMediaDir: 'E:/EarlyBird/media', fetchImpl });
+    await notifier.draftReady({
+      job: { id: 'j2', metadata: { editorial: { contentType: 'explainer' }, visualBrief: { fileName: '1-visual-brief.md' } } },
+      draft: { mediaId: 'media-2', requestSummary: { title: '视频草稿' } },
+      source: { handle: 'grok' },
+      post: { postId: '2' },
+      manualVideoFiles: ['2-video.mp4'],
+    });
+    const body = fetchImpl.mock.calls[0][1].body;
+    expect(body).toContain('未自动上传至微信素材库');
+    expect(body).toContain('E:/EarlyBird/media');
+    expect(body).toContain('2-video.mp4');
+    expect(body).toContain('1-visual-brief.md');
+  });
+
   it('summarizes today’s drafts and why the remaining posts were not produced', async () => {
     const prisma = {
       earlyBirdSource: { findMany: vi.fn(async () => [{ id: 's1', handle: 'openai' }, { id: 's2', handle: 'geminiapp' }]) },
@@ -278,6 +296,19 @@ describe('thread assembly and humanizer', () => {
     expect(cleaned).toContain('20：13');
     expect(cleaned).not.toContain('20：13：05');
   });
+
+  it('keeps English sentence punctuation and version numbers intact', () => {
+    expect(fullWidthPunctuation('Image 2.0 delivers better continuity.')).toBe('Image 2.0 delivers better continuity.');
+    expect(fullWidthPunctuation('模型已经上线.')).toBe('模型已经上线。');
+    expect(fullWidthPunctuation('Grok Image 2.0 模型上线, 并支持多场景.')).toBe('Grok Image 2.0 模型上线，并支持多场景。');
+  });
+  it('alternates two-sentence and one-sentence body paragraphs', () => {
+    const first = `第一句交代官方发布的核心背景和读者需要了解的信息范围，以保证段落具备足够的信息密度。第二句补充这个变化对现有使用流程的具体影响，而不只是重复官方的宣传用语。`;
+    const second = `第一句继续解释新能力如何连接到实际场景，使读者能够看到它与旧版本之间的清晰区别。第二句将可以继续观察的问题留给读者，让结尾不会成为空洞的总结。`;
+    const varied = varyEditorialParagraphs(`${first}\n\n${second}`);
+    expect(varied).toContain(first);
+    expect(varied).toContain('第一句继续解释新能力如何连接到实际场景，使读者能够看到它与旧版本之间的清晰区别。\n\n第二句将可以继续观察的问题留给读者，让结尾不会成为空洞的总结。');
+  });
   it('merges adjacent fragments into a complete reading paragraph', () => {
     const compact = compactEditorialMarkdown('第一句话只交代了背景。\n\n第二句话补足了读者理解这件事所需的关键事实。');
     expect(compact).toBe('第一句话只交代了背景。第二句话补足了读者理解这件事所需的关键事实。');
@@ -331,6 +362,17 @@ describe('Graphite renderer', () => {
   });
   it('blocks raw Markdown emphasis that reaches the final HTML', async () => {
     await expect(validateGzhHtml('<section><p style="font-size:15px;">**不应出现**</p></section>', { run: async () => '完全合规' })).rejects.toThrow('raw Markdown emphasis');
+  });
+});
+
+describe('end visual briefs', () => {
+  it('creates three safe, topic-specific image-generation prompts', () => {
+    const brief = buildEndVisualBrief({ title: 'Grok Imagine Video 1.5 上线', digest: 'Image 2.0 带来更强的多镜头连贯性。', contentType: 'explainer', sourceHandle: 'grok' });
+    expect(brief).toContain('配图 1');
+    expect(brief).toContain('配图 2');
+    expect(brief).toContain('配图 3');
+    expect(brief).toContain('Grok Imagine Video 1.5 上线');
+    expect(brief).toContain('不要任何可读文字');
   });
 });
 
