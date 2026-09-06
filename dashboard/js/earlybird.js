@@ -3,14 +3,20 @@
   'use strict';
 
   const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001/api' : '/api';
-  const statusLabels = { detected: '已发现', captured: '已采集', held: '等待合并', processing: '处理中', manual_review: '人工审核', verified: '已验证', failed: '失败', ignored: '已忽略' };
+  const statusLabels = { detected: '已发现', classified: '已判别', held: '等待合并', captured: '已采集', analyzed: '已分析', written: '已写作', humanized: '已审稿', rendered: '已排版', draft_created: '已创建草稿', manual_review: '人工审核', verified: '已验证', merged: '已并入主稿', failed: '失败', ignored: '已忽略' };
   const pipelineSteps = [
     ['detected', '已发现', 'blue'],
-    ['captured', '已采集', 'orange'],
-    ['processing', '处理中', 'orange'],
+    ['classified', '已判别', 'blue'],
     ['held', '等待合并', 'yellow'],
+    ['captured', '已采集', 'orange'],
+    ['analyzed', '已分析', 'orange'],
+    ['written', '已写作', 'orange'],
+    ['humanized', '已审稿', 'orange'],
+    ['rendered', '已排版', 'orange'],
+    ['draft_created', '已创建草稿', 'green'],
     ['manual_review', '人工审核', 'yellow'],
     ['verified', '已验证', 'green'],
+    ['merged', '已并入主稿', 'muted'],
     ['failed', '失败', 'red'],
     ['ignored', '已忽略', 'muted'],
   ];
@@ -66,20 +72,20 @@
     $('source-meta').textContent = `${sources.filter(source => source.enabled).length} 个启用`;
     if (!sources.length) { $('source-list').innerHTML = '<p class="empty-state">还没有配置 X 来源。</p>'; return; }
     $('source-list').replaceChildren(...sources.map(source => {
-      const row = document.createElement('div'); row.className = 'source-row'; const mark = document.createElement('span'); mark.className = 'source-mark'; mark.textContent = initials(source.handle); const main = document.createElement('div'); main.className = 'source-main'; const strong = document.createElement('strong'); strong.textContent = source.displayName || `@${source.handle}`; const small = document.createElement('small'); small.textContent = `@${source.handle} · 最近轮询 ${dateTime(source.lastPolledAt)}`; main.append(strong, small); const state = document.createElement('span'); state.className = `source-state ${source.status.state}`; state.textContent = source.lastError ? '有错误' : source.status.label; if (source.lastError) state.title = source.lastError; row.append(mark, main, state); return row;
+      const row = document.createElement('div'); row.className = 'source-row'; const mark = document.createElement('span'); mark.className = 'source-mark'; mark.textContent = initials(source.handle); const main = document.createElement('div'); main.className = 'source-main'; const strong = document.createElement('strong'); strong.textContent = source.displayName || `@${source.handle}`; const small = document.createElement('small'); small.textContent = `@${source.handle} · 最近轮询 ${dateTime(source.lastPolledAt)}`; main.append(strong, small); const state = document.createElement('span'); state.className = `source-state ${source.status.state}`; state.textContent = source.status.label; row.append(mark, main, state); return row;
     }));
   }
 
   function renderAttention(items) {
     if (!items.length) { $('attention-list').innerHTML = '<p class="empty-state">目前没有卡住的任务，继续观察下一次轮询。</p>'; return; }
     $('attention-list').replaceChildren(...items.map(item => {
-      const row = document.createElement('div'); row.className = 'attention-row'; const badge = document.createElement('span'); badge.className = `attention-badge ${item.status}`; badge.textContent = statusLabels[item.status] || item.status; const main = document.createElement('div'); main.className = 'attention-main'; const strong = document.createElement('strong'); strong.textContent = item.error || `${item.source} 的任务尚未进入下一步`; const small = document.createElement('small'); small.textContent = `${item.source} · ${dateTime(item.updatedAt)}${item.text ? ` · ${escapeText(item.text).slice(0, 72)}` : ''}`; main.append(strong, small); row.append(badge, main); if (item.status === 'failed') { const button = document.createElement('button'); button.className = 'button-secondary'; button.type = 'button'; button.dataset.retryJob = item.id; button.textContent = '重试'; row.append(button); } return row;
+      const row = document.createElement('div'); row.className = 'attention-row'; const badge = document.createElement('span'); badge.className = `attention-badge ${item.status}`; badge.textContent = statusLabels[item.status] || item.status; const main = document.createElement('div'); main.className = 'attention-main'; const strong = document.createElement('strong'); strong.textContent = item.reason || `${item.source} 的任务尚未进入下一步`; const small = document.createElement('small'); small.textContent = `${item.source} · ${dateTime(item.updatedAt)}${item.postId ? ` · X 帖子 ${item.postId}` : ''}`; main.append(strong, small); row.append(badge, main); if (item.status === 'failed' && localStorage.getItem('authToken')) { const button = document.createElement('button'); button.className = 'button-secondary'; button.type = 'button'; button.dataset.retryJob = item.id; button.textContent = '重试'; row.append(button); } else if (item.status === 'failed') { const hint = document.createElement('span'); hint.className = 'retry-hint'; hint.textContent = '登录后可重试'; row.append(hint); } return row;
     }));
   }
 
   function renderActivity(data) {
-    const jobs = data.jobs.map(job => ({ type: '任务', title: `${statusLabels[job.status] || job.status} · ${job.source?.displayName || job.source?.handle || '未知来源'}`, detail: job.error || escapeText(job.post?.text).slice(0, 92), time: job.updatedAt }));
-    const notes = data.notifications.map(note => ({ type: '通知', title: `${note.kind} · ${note.status}`, detail: note.error || '通知记录已写入', time: note.createdAt }));
+    const jobs = data.jobs.map(job => ({ type: '任务', title: `${statusLabels[job.status] || job.status} · ${job.source?.displayName || job.source?.handle || '未知来源'}`, detail: job.note || '正在推进。', time: job.updatedAt }));
+    const notes = data.notifications.map(note => ({ type: '通知', title: `${note.kind} · ${note.status}`, detail: '通知记录已写入', time: note.createdAt }));
     const items = [...jobs, ...notes].sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 20);
     if (!items.length) { $('activity-list').innerHTML = '<p class="empty-state">还没有任务或通知记录。</p>'; return; }
     $('activity-list').replaceChildren(...items.map(item => { const row = document.createElement('div'); row.className = 'activity-row'; const type = document.createElement('span'); type.className = 'activity-type'; type.textContent = item.type === '任务' ? '↗' : '•'; const main = document.createElement('div'); main.className = 'activity-main'; const title = document.createElement('strong'); title.textContent = item.title; const detail = document.createElement('small'); detail.textContent = item.detail || '无附加信息'; main.append(title, detail); const time = document.createElement('time'); time.className = 'activity-time'; time.textContent = dateTime(item.time); row.append(type, main, time); return row; }));

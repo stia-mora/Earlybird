@@ -30,12 +30,11 @@ async function enqueueArticleProcess(jobId) {
   }
   await queue.add('process', { jobId }, { jobId: queueJobId, removeOnComplete: 100, removeOnFail: 100 });
 }
-router.use(authMiddleware);
-
 function startOfToday() {
-  const value = new Date();
-  value.setHours(0, 0, 0, 0);
-  return value;
+  const shanghaiOffsetMs = 8 * 60 * 60 * 1000;
+  const value = new Date(Date.now() + shanghaiOffsetMs);
+  value.setUTCHours(0, 0, 0, 0);
+  return new Date(value.getTime() - shanghaiOffsetMs);
 }
 
 function serviceStatus(lastPolledAt, pollIntervalSeconds) {
@@ -46,16 +45,26 @@ function serviceStatus(lastPolledAt, pollIntervalSeconds) {
   return { state: 'healthy', label: '采集正常' };
 }
 
+function dashboardJobNote(job) {
+  if (job.status === 'ignored') return '已由选题规则筛选，未创建草稿。';
+  if (job.status === 'merged') return '已并入关联事件的主稿。';
+  if (job.status === 'held') return '正在等待关联官方消息以决定是否合并。';
+  if (job.status === 'manual_review') return '自动审稿未通过，需要人工复核。';
+  if (job.status === 'failed') return '流水线未完成，请登录后在任务详情中查看原因或重试。';
+  if (job.status === 'verified') return '已创建并通过微信草稿回读校验。';
+  return '正在推进到下一个写作或排版阶段。';
+}
+
 router.get('/overview', async (_req, res) => {
   try {
     const today = startOfToday();
     const [sources, postsToday, jobsToday, jobs, polls, notifications, jobGroups, drafts, verifiedDrafts] = await Promise.all([
-      prisma.earlyBirdSource.findMany({ orderBy: { handle: 'asc' }, select: { id: true, handle: true, displayName: true, enabled: true, baselineComplete: true, pollIntervalSeconds: true, lastPolledAt: true, lastError: true, updatedAt: true } }),
+      prisma.earlyBirdSource.findMany({ orderBy: { handle: 'asc' }, select: { id: true, handle: true, displayName: true, enabled: true, baselineComplete: true, pollIntervalSeconds: true, lastPolledAt: true, updatedAt: true } }),
       prisma.earlyBirdPost.count({ where: { capturedAt: { gte: today } } }),
       prisma.earlyBirdArticleJob.count({ where: { detectedAt: { gte: today } } }),
-      prisma.earlyBirdArticleJob.findMany({ take: 30, orderBy: { updatedAt: 'desc' }, include: { source: { select: { handle: true, displayName: true } }, post: { select: { postId: true, text: true, sourceUrl: true, capturedAt: true } }, draft: { select: { verified: true, failureReason: true, mediaId: true } } } }),
-      prisma.earlyBirdPoll.findMany({ take: 20, orderBy: { polledAt: 'desc' }, include: { source: { select: { handle: true, displayName: true } } } }),
-      prisma.earlyBirdNotification.findMany({ take: 20, orderBy: { createdAt: 'desc' } }),
+      prisma.earlyBirdArticleJob.findMany({ take: 30, orderBy: { updatedAt: 'desc' }, select: { id: true, status: true, updatedAt: true, source: { select: { handle: true, displayName: true } }, post: { select: { postId: true } }, draft: { select: { verified: true } } } }),
+      prisma.earlyBirdPoll.findMany({ take: 20, orderBy: { polledAt: 'desc' }, select: { id: true, outcome: true, detectedCount: true, polledAt: true, source: { select: { handle: true, displayName: true } } } }),
+      prisma.earlyBirdNotification.findMany({ take: 20, orderBy: { createdAt: 'desc' }, select: { kind: true, status: true, createdAt: true } }),
       prisma.earlyBirdArticleJob.groupBy({ by: ['status'], _count: { _all: true } }),
       prisma.earlyBirdDraft.count(),
       prisma.earlyBirdDraft.count({ where: { verified: true } }),
@@ -63,7 +72,14 @@ router.get('/overview', async (_req, res) => {
 
     const enabledSources = sources.filter(source => source.enabled);
     const sourceStates = sources.map(source => ({
-      ...source,
+      id: source.id,
+      handle: source.handle,
+      displayName: source.displayName,
+      enabled: source.enabled,
+      baselineComplete: source.baselineComplete,
+      pollIntervalSeconds: source.pollIntervalSeconds,
+      lastPolledAt: source.lastPolledAt,
+      updatedAt: source.updatedAt,
       status: source.enabled ? serviceStatus(source.lastPolledAt, source.pollIntervalSeconds) : { state: 'disabled', label: '已停用' },
     }));
     const activeStates = sourceStates.filter(source => source.enabled).map(source => source.status.state);
@@ -77,9 +93,17 @@ router.get('/overview', async (_req, res) => {
 
     const counts = Object.fromEntries(jobGroups.map(group => [group.status, group._count._all]));
     const attention = jobs
-      .filter(job => ['failed', 'manual_review', 'held', 'detected', 'captured', 'ignored'].includes(job.status) || job.error || job.draft?.failureReason)
+      .filter(job => ['failed', 'manual_review', 'held', 'detected', 'classified', 'captured', 'analyzed', 'written', 'humanized', 'rendered', 'draft_created', 'ignored'].includes(job.status))
       .slice(0, 8)
-      .map(job => ({ id: job.id, status: job.status, error: job.error || job.draft?.failureReason || null, source: job.source?.displayName || job.source?.handle || '未知来源', text: job.post?.text || '', updatedAt: job.updatedAt }));
+      .map(job => ({ id: job.id, status: job.status, reason: dashboardJobNote(job), source: job.source?.displayName || job.source?.handle || '未知来源', postId: job.post?.postId || '', updatedAt: job.updatedAt }));
+    const safeJobs = jobs.map(job => ({ ...job, note: dashboardJobNote(job) }));
+    const safePolls = polls.map(poll => ({
+      id: poll.id,
+      outcome: poll.outcome,
+      detectedCount: poll.detectedCount,
+      polledAt: poll.polledAt,
+      source: poll.source,
+    }));
 
     res.json({
       generatedAt: new Date().toISOString(),
@@ -94,8 +118,8 @@ router.get('/overview', async (_req, res) => {
       metrics: { sources: sources.length, enabledSources: enabledSources.length, postsToday, jobsToday, drafts, verifiedDrafts },
       pipeline: counts,
       sources: sourceStates,
-      jobs,
-      polls,
+      jobs: safeJobs,
+      polls: safePolls,
       notifications,
       attention,
     });
@@ -103,6 +127,11 @@ router.get('/overview', async (_req, res) => {
     res.status(503).json({ error: `EarlyBird overview unavailable: ${error.message}` });
   }
 });
+
+// The overview is intentionally read-only and excludes source credentials, post bodies,
+// detailed errors, notification payloads, and every control action. It is safe for the
+// local operations screen; all management and retry routes below remain authenticated.
+router.use(authMiddleware);
 
 function validWebsite(value) {
   if (value == null || value === '') return true;
