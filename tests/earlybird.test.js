@@ -363,23 +363,21 @@ describe('Graphite renderer', () => {
     await expect(validateGzhHtml('<section><p style="font-size:15px;">**不应出现**</p></section>', { run: async () => '完全合规' })).rejects.toThrow('raw Markdown emphasis');
   });
 
-  it('puts a complete fixed end-card set after references', async () => {
+  it('puts the fixed end-card after references', async () => {
     const html = await renderGzhMarkdown('事实解释。', {
       references: ['https://x.com/openai/status/1'],
-      endVisuals: [{ src: 'https://wechat.test/signal.png', alt: '追踪信号' }, { src: 'https://wechat.test/observe.png', alt: '持续观察' }],
+      endVisuals: [{ src: 'https://wechat.test/endcard.png', alt: '早鸟 Pulse 文末品牌图' }],
     });
-    expect(html.indexOf('参考资料：')).toBeLessThan(html.indexOf('signal.png'));
-    expect(html).toContain('observe.png');
+    expect(html.indexOf('参考资料：')).toBeLessThan(html.indexOf('endcard.png'));
   });
 });
 
 describe('fixed end visuals', () => {
-  it('uses the fixed pair only when both image files are available', async () => {
+  it('uses the fixed image only when it is available', async () => {
     await expect(availableFixedEndVisuals({ mediaDir: 'E:/EarlyBird/media', exists: async () => true })).resolves.toEqual([
-      expect.objectContaining({ fileName: 'earlybird-endcard-signal.png' }),
-      expect.objectContaining({ fileName: 'earlybird-endcard-observe.png' }),
+      expect.objectContaining({ fileName: 'earlybird-endcard.png' }),
     ]);
-    await expect(availableFixedEndVisuals({ mediaDir: 'E:/EarlyBird/media', exists: async path => !path.endsWith('observe.png') })).resolves.toEqual([]);
+    await expect(availableFixedEndVisuals({ mediaDir: 'E:/EarlyBird/media', exists: async () => false })).resolves.toEqual([]);
   });
 });
 
