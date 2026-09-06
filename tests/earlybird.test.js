@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import { cacheScraperFactory, configuredXCookies, createSourceMonitor, mergeCookieHeaders, retryAtFromRateLimit } from '../src/earlybird/sourceMonitor.js';
 import { startupPollDelay } from '../src/earlybird/sourcePollTiming.js';
-import { createMultimodalClient } from '../src/earlybird/aiPipeline.js';
+import { analyzePost, createMultimodalClient } from '../src/earlybird/aiPipeline.js';
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { assertGzhTypography, renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
@@ -122,6 +122,24 @@ describe('EarlyBird source monitor', () => {
     const monitor = createSourceMonitor({ prisma, scraperFactory: async () => ({ scrapeTweets: async () => [] }), now: () => new Date('2026-01-01T00:01:00Z') });
     await expect(monitor.pollSource('s1')).resolves.toEqual({ baseline: false, detected: 0 });
     expect(prisma.earlyBirdPoll.create).toHaveBeenCalledWith({ data: expect.objectContaining({ sourceId: 's1', outcome: 'no_new', detectedCount: 0 }) });
+  });
+
+  it('retries newly detected article jobs when a downstream stage fails', async () => {
+    const source = { id: 's1', handle: 'openai', enabled: true, baselineComplete: true, lastSeenCreatedAt: new Date('2026-01-01T00:00:00Z'), lastSeenPostId: '1' };
+    const queue = { add: vi.fn(async () => {}) };
+    const prisma = {
+      earlyBirdSource: { findUnique: vi.fn(async () => source), update: vi.fn(async () => source) },
+      earlyBirdPost: { upsert: vi.fn(async () => ({ id: 'p2' })) },
+      earlyBirdArticleJob: { upsert: vi.fn(async () => ({ id: 'j2' })) },
+    };
+    const monitor = createSourceMonitor({ prisma, queue, scraperFactory: async () => ({ scrapeTweets: async () => [{ id: '2', createdAt: '2026-01-01T00:01:00Z', text: 'new' }] }) });
+
+    await monitor.pollSource('s1');
+
+    expect(queue.add).toHaveBeenCalledWith('process', { jobId: 'j2' }, expect.objectContaining({
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 30000 },
+    }));
   });
 });
 
@@ -468,6 +486,16 @@ describe('WeChat client', () => {
 });
 
 describe('multimodal fallback', () => {
+  it('skips missing video keyframes instead of failing an article analysis', async () => {
+    const client = { complete: vi.fn(async () => ({ translation: '译文', facts: [] })) };
+    await analyzePost({
+      client,
+      post: { text: '视频发布' },
+      assets: [{ kind: 'video', metadata: { keyframes: ['C:/missing-frame.jpg'] } }],
+    });
+    expect(client.complete).toHaveBeenCalledWith(expect.objectContaining({ images: [] }));
+  });
+
   it('uses the backup OpenAI-compatible provider after the primary provider fails', async () => {
     const fetchImpl = vi.fn(async url => {
       if (url.startsWith('https://primary.test')) return new Response(JSON.stringify({ error: { message: 'primary unavailable' } }), { status: 503 });

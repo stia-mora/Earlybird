@@ -13,6 +13,15 @@ function mediaKind(item) {
   return String(item.mediaType || item.type || '').toLowerCase().includes('video') || /\.mp4(?:\?|$)/i.test(item.url || '') ? 'video' : 'image';
 }
 
+async function existingFile(path) {
+  try {
+    const info = await stat(path);
+    return info.isFile() && info.size > 0 ? path : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createMediaPipeline({ prisma, outputDir = process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', publicBaseUrl = process.env.EARLYBIRD_PUBLIC_MEDIA_URL || '', ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg', logger = console } = {}) {
   async function ffmpeg(args) {
     try { await execFileAsync(ffmpegPath, args, { windowsHide: true }); return true; }
@@ -30,7 +39,6 @@ export function createMediaPipeline({ prisma, outputDir = process.env.EARLYBIRD_
         if (!item.path) continue;
         const kind = mediaKind(item);
         const sha256 = await fileSha256(item.path);
-        const file = basename(item.path);
         const base = join(outputDir, `${post.postId}-${records.length + 1}`);
         let localPath = item.path;
         const metadata = { tweetId: item.tweetId, width: item.width, height: item.height, altText: item.altText };
@@ -44,12 +52,16 @@ export function createMediaPipeline({ prisma, outputDir = process.env.EARLYBIRD_
           ]);
           if (transcoded) {
             localPath = mp4;
-            metadata.posterPath = `${base}-poster.jpg`;
-            metadata.audioPath = `${base}.mp3`;
-            metadata.keyframes = [`${base}-frame-01.jpg`, `${base}-frame-02.jpg`, `${base}-frame-03.jpg`];
-            await ffmpeg(['-y', '-i', mp4, '-vf', 'thumbnail,scale=960:-2', '-frames:v', '1', metadata.posterPath]);
+            const posterPath = `${base}-poster.jpg`;
+            const audioPath = `${base}.mp3`;
+            const keyframePaths = [`${base}-frame-01.jpg`, `${base}-frame-02.jpg`, `${base}-frame-03.jpg`];
+            await ffmpeg(['-y', '-i', mp4, '-vf', 'thumbnail,scale=960:-2', '-frames:v', '1', posterPath]);
             await ffmpeg(['-y', '-i', mp4, '-vf', 'fps=1/5,scale=960:-2', '-frames:v', '3', `${base}-frame-%02d.jpg`]);
-            await ffmpeg(['-y', '-i', mp4, '-vn', '-acodec', 'libmp3lame', metadata.audioPath]);
+            await ffmpeg(['-y', '-i', mp4, '-vn', '-acodec', 'libmp3lame', audioPath]);
+            const [poster, audio, ...keyframes] = await Promise.all([posterPath, audioPath, ...keyframePaths].map(existingFile));
+            if (poster) metadata.posterPath = poster;
+            if (audio) metadata.audioPath = audio;
+            metadata.keyframes = keyframes.filter(Boolean);
           }
         }
         let publicUrl = publicBaseUrl ? `${publicBaseUrl.replace(/\/$/, '')}/${encodeURIComponent(basename(localPath))}` : null;

@@ -2,6 +2,13 @@ import { DEFAULT_SOURCES, comparePosts } from './utils.js';
 import { readFile } from 'node:fs/promises';
 import { normalizeCookies } from '../scrapers/twitter/http/accountPool.js';
 
+const ARTICLE_QUEUE_OPTIONS = {
+  attempts: 3,
+  backoff: { type: 'exponential', delay: 30000 },
+  removeOnComplete: 100,
+  removeOnFail: 100,
+};
+
 function withTimeout(promise, timeoutMs) {
   let timer;
   return Promise.race([
@@ -110,7 +117,7 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
             create: { sourceId: source.id, postId: String(post.id), rootPostId: String(post.id), sourceUrl: `https://x.com/${source.handle}/status/${post.id}`, authorUsername: post.author?.username || source.handle, text: post.text || '', createdAt: post.createdAt ? new Date(post.createdAt) : null, rawData: post, mediaData: post.media || [] },
           });
           const job = await prisma.earlyBirdArticleJob.upsert({ where: { postId: record.id }, update: {}, create: { sourceId: source.id, postId: record.id, status: 'detected' } });
-          if (queue) await queue.add('process', { jobId: job.id }, { jobId: `earlybird-article-${job.id}`, removeOnComplete: 100, removeOnFail: 100 });
+          if (queue) await queue.add('process', { jobId: job.id }, { jobId: `earlybird-article-${job.id}`, ...ARTICLE_QUEUE_OPTIONS });
           detected += 1;
           postIds.push(String(post.id));
         }
