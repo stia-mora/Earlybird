@@ -27,6 +27,8 @@
 
 图片会下载、hash 去重并通过 `media/uploadimg` 上传；首图作为封面通过 `material/add_material` 上传。视频转码为 H.264/AAC，生成封面和关键帧，但不再自动上传至微信素材库。原始 MP4 会保留在 `data/earlybird/media`，草稿通知会提示文件名供人工审核上传。正文仍使用封面、关键帧和视频摘要，不生成不稳定的 `<video>` 标签。
 
+文末使用两张全局固定的栏目尾图，紧跟在参考资料之后。把 `earlybird-endcard-signal.png` 和 `earlybird-endcard-observe.png` 同时放入 `data/earlybird/media/fixed-end/`，后续所有草稿会自动上传它们并插入文末。缺少任一张时不会插入半套尾图。制作规格与生图提示词见 `docs/earlybird-fixed-end-visuals.md`。
+
 排版读取固定的 `vendor/references` 快照，输出只包含公众号可粘贴的 `<section>` 片段。校验命令：
 
 ```bash

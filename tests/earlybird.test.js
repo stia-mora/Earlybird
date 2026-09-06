@@ -17,7 +17,7 @@ import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, edi
 import { enqueueInterruptedJobs } from '../src/earlybird/jobRecovery.js';
 import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
-import { buildEndVisualBrief } from '../src/earlybird/visualBrief.js';
+import { availableFixedEndVisuals } from '../src/earlybird/fixedEndVisuals.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -165,7 +165,7 @@ describe('EarlyBird Hermes notifications', () => {
     const fetchImpl = vi.fn(async () => ({ ok: true, text: async () => '{"status":"sent"}' }));
     const notifier = createHermesNotifier({ url: 'http://relay/notify', token: 'test-token', hostMediaDir: 'E:/EarlyBird/media', fetchImpl });
     await notifier.draftReady({
-      job: { id: 'j2', metadata: { editorial: { contentType: 'explainer' }, visualBrief: { fileName: '1-visual-brief.md' } } },
+      job: { id: 'j2', metadata: { editorial: { contentType: 'explainer' } } },
       draft: { mediaId: 'media-2', requestSummary: { title: '视频草稿' } },
       source: { handle: 'grok' },
       post: { postId: '2' },
@@ -175,7 +175,6 @@ describe('EarlyBird Hermes notifications', () => {
     expect(body).toContain('未自动上传至微信素材库');
     expect(body).toContain('E:/EarlyBird/media');
     expect(body).toContain('2-video.mp4');
-    expect(body).toContain('1-visual-brief.md');
   });
 
   it('summarizes today’s drafts and why the remaining posts were not produced', async () => {
@@ -363,16 +362,24 @@ describe('Graphite renderer', () => {
   it('blocks raw Markdown emphasis that reaches the final HTML', async () => {
     await expect(validateGzhHtml('<section><p style="font-size:15px;">**不应出现**</p></section>', { run: async () => '完全合规' })).rejects.toThrow('raw Markdown emphasis');
   });
+
+  it('puts a complete fixed end-card set after references', async () => {
+    const html = await renderGzhMarkdown('事实解释。', {
+      references: ['https://x.com/openai/status/1'],
+      endVisuals: [{ src: 'https://wechat.test/signal.png', alt: '追踪信号' }, { src: 'https://wechat.test/observe.png', alt: '持续观察' }],
+    });
+    expect(html.indexOf('参考资料：')).toBeLessThan(html.indexOf('signal.png'));
+    expect(html).toContain('observe.png');
+  });
 });
 
-describe('end visual briefs', () => {
-  it('creates three safe, topic-specific image-generation prompts', () => {
-    const brief = buildEndVisualBrief({ title: 'Grok Imagine Video 1.5 上线', digest: 'Image 2.0 带来更强的多镜头连贯性。', contentType: 'explainer', sourceHandle: 'grok' });
-    expect(brief).toContain('配图 1');
-    expect(brief).toContain('配图 2');
-    expect(brief).toContain('配图 3');
-    expect(brief).toContain('Grok Imagine Video 1.5 上线');
-    expect(brief).toContain('不要任何可读文字');
+describe('fixed end visuals', () => {
+  it('uses the fixed pair only when both image files are available', async () => {
+    await expect(availableFixedEndVisuals({ mediaDir: 'E:/EarlyBird/media', exists: async () => true })).resolves.toEqual([
+      expect.objectContaining({ fileName: 'earlybird-endcard-signal.png' }),
+      expect.objectContaining({ fileName: 'earlybird-endcard-observe.png' }),
+    ]);
+    await expect(availableFixedEndVisuals({ mediaDir: 'E:/EarlyBird/media', exists: async path => !path.endsWith('observe.png') })).resolves.toEqual([]);
   });
 });
 

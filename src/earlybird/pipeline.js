@@ -11,7 +11,7 @@ import { createWeChatClient } from './wechatClient.js';
 import { classifyEditorial } from './editorialClassifier.js';
 import { collectResearchImages, researchOfficialSources } from './researchBrowser.js';
 import { createHermesNotifier } from './hermesNotifier.js';
-import { writeEndVisualBrief } from './visualBrief.js';
+import { availableFixedEndVisuals } from './fixedEndVisuals.js';
 
 const MERGEABLE_STATUSES = ['detected', 'classified', 'held', 'captured', 'failed'];
 
@@ -163,23 +163,16 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const article = await writer.write({ post: job.post, thread, analysis, editorial, storyPosts, research: { ...research, assets: allAssets.filter(asset => asset.kind === 'image').map(asset => ({ path: asset.localPath, sourceUrl: asset.sourceUrl, altText: asset.metadata?.altText || '' })) }, assets: articleAssets, sourceUrl: job.post.sourceUrl });
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'written', markdown: article.markdown } });
         const polished = await humanize({ client: llmClient, markdown: article.markdown, context: { postId: job.post.postId, analysis, editorial, research: { queries: research.queries, citations: research.citations.map(citation => ({ title: citation.title, url: citation.url })) } } });
-        const visualBriefPath = await writeEndVisualBrief({
-          postId: job.post.postId,
-          title: article.title,
-          digest: article.digest,
-          contentType: editorial.contentType,
-          sourceHandle: job.source.handle,
-        });
-        analysisMetadata.visualBrief = { fileName: basename(visualBriefPath) };
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: polished.manualReview ? 'manual_review' : 'humanized', markdown: polished.markdown, humanizerScore: polished.score, metadata: analysisMetadata } });
         if (polished.manualReview) return prisma.earlyBirdArticleJob.findUnique({ where: { id: job.id } });
+        const endVisuals = await availableFixedEndVisuals();
         const assetUrls = new Map();
         if (!wechatClient) {
-          const html = await renderGzhMarkdown(polished.markdown, { title: article.title, digest: article.digest, contentType: editorial.contentType, references });
+          const html = await renderGzhMarkdown(polished.markdown, { title: article.title, digest: article.digest, contentType: editorial.contentType, references, endVisuals });
           await validateGzhHtml(html);
           return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html } });
         }
-        const visualAssets = articleVisualAssets(articleAssets);
+        const visualAssets = [...articleVisualAssets(articleAssets), ...endVisuals];
         let thumb = null;
         if (visualAssets[0]) thumb = await wechatClient.uploadPermanentMaterial(visualAssets[0].localPath, 'thumb');
         else thumb = await wechatClient.uploadPermanentMaterial(evidencePath, 'thumb');
@@ -193,7 +186,8 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
           await prisma.earlyBirdAsset.update({ where: { id: asset.id }, data: { wechatMediaId: null, status: 'manual_upload_required' } });
         }
         const markdownForRender = [...assetUrls.entries()].reduce((value, [localPath, url]) => value.replaceAll(localPath, url), polished.markdown);
-        const html = await renderGzhMarkdown(markdownForRender, { title: article.title, digest: article.digest, contentType: editorial.contentType, references });
+        const renderedEndVisuals = endVisuals.map(asset => ({ ...asset, src: assetUrls.get(asset.localPath) || asset.localPath }));
+        const html = await renderGzhMarkdown(markdownForRender, { title: article.title, digest: article.digest, contentType: editorial.contentType, references, endVisuals: renderedEndVisuals });
         await validateGzhHtml(html);
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html } });
         const draft = await wechatClient.addDraft({ title: article.title.slice(0, 64), author: process.env.WECHAT_AUTHOR || '', digest: article.digest?.slice(0, 120), content: html, content_source_url: '', thumb_media_id: thumb?.media_id || '' });

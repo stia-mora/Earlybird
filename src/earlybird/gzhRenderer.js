@@ -96,7 +96,7 @@ function normalizedTitle(value) {
   return plainText(value).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
 }
 
-export async function renderGzhMarkdown(markdown, { title, digest, contentType, references = [] } = {}) {
+export async function renderGzhMarkdown(markdown, { title, digest, contentType, references = [], endVisuals = [] } = {}) {
   await loadGzhSources();
   const lines = sanitizeEditorialMarkdown(markdown, { preserveParagraphs: true }).split('\n');
   const safeTitle = sanitizeEditorialMarkdown(title).replace(/\s*\n\s*/g, ' ');
@@ -163,6 +163,11 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
       html += `<p style="font-size:13px;color:#71717A;line-height:1.8;margin:0 0 8px;word-break:break-all;"><span leaf="">${escapeHtml(url)}</span></p>`;
     });
     html += '</section>';
+  }
+  for (const visual of endVisuals) {
+    const src = visual?.src || visual?.localPath;
+    if (!src) continue;
+    html += `<section style="margin:0 10px 20px;"><img src="${escapeHtml(src)}" alt="${escapeHtml(plainText(visual.alt || 'EarlyBird Pulse'))}" style="max-width:100%;height:auto;display:block;margin:0 auto;"></section>`;
   }
   return `${html}</section>`;
 }
