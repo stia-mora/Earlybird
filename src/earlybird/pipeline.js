@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { stat } from 'node:fs/promises';
 import { assembleThread } from './threadAssembler.js';
 import { analyzePost, createMultimodalClient } from './aiPipeline.js';
 import { humanize } from './humanizer.js';
@@ -40,7 +41,29 @@ async function collectAssets({ prisma, mediaPipeline, post, thread }) {
   if (!prisma?.earlyBirdAsset?.findMany) return threadAssets;
   const stored = await prisma.earlyBirdAsset.findMany({ where: { postId: post.id, localPath: { not: null } } });
   const known = new Set(threadAssets.map(asset => asset.id || `${asset.sourceUrl}:${asset.localPath}`));
-  return [...threadAssets, ...stored.filter(asset => belongsToThread(asset) && !known.has(asset.id || `${asset.sourceUrl}:${asset.localPath}`))];
+  return existingAssets([...threadAssets, ...stored.filter(asset => belongsToThread(asset) && !known.has(asset.id || `${asset.sourceUrl}:${asset.localPath}`))]);
+}
+
+async function existingFile(path) {
+  try {
+    const info = await stat(path);
+    return info.isFile() && info.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function existingAssets(assets) {
+  const available = await Promise.all(assets.map(async asset => {
+    if (!asset?.localPath || !(await existingFile(asset.localPath))) return null;
+    if (asset.kind !== 'video') return asset;
+    const metadata = { ...(asset.metadata || {}) };
+    if (metadata.posterPath && !(await existingFile(metadata.posterPath))) delete metadata.posterPath;
+    if (metadata.audioPath && !(await existingFile(metadata.audioPath))) delete metadata.audioPath;
+    metadata.keyframes = (await Promise.all((metadata.keyframes || []).map(async path => (await existingFile(path)) ? path : null))).filter(Boolean);
+    return { ...asset, metadata };
+  }));
+  return available.filter(Boolean);
 }
 
 function postEvidenceAsset(post, localPath) {

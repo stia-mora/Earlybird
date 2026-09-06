@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cacheScraperFactory, configuredXCookies, createSourceMonitor, mergeCookieHeaders, retryAtFromRateLimit } from '../src/earlybird/sourceMonitor.js';
 import { startupPollDelay } from '../src/earlybird/sourcePollTiming.js';
 import { analyzePost, createMultimodalClient } from '../src/earlybird/aiPipeline.js';
@@ -406,7 +407,8 @@ describe('event story pipeline', () => {
     const related = { id: 'p2', postId: '2', authorUsername: 'geminiapp', sourceUrl: 'https://x.com/geminiapp/status/2', text: 'Related official detail', rawData: { id: '2', text: 'Related official detail' }, createdAt: new Date('2026-09-05T00:10:00Z'), source: { handle: 'geminiapp', website: 'https://gemini.google.com' }, jobs: [] };
     const job = { id: 'j1', status: 'held', metadata: { editorial: { holdUntil: '2099-01-01T00:00:00.000Z' } }, detectedAt: new Date('2026-09-05T00:20:00Z'), postId: post.id, sourceId: 's1', post, source: { handle: 'openai', website: 'https://openai.com' }, draft: null };
     const updates = [];
-    const videoAsset = { id: 'a1', postId: post.id, kind: 'video', sourceUrl: 'https://x.com/video', localPath: 'video.mp4', metadata: { posterPath: 'poster.jpg', keyframes: ['frame-1.jpg'] } };
+    const fixturePath = fileURLToPath(new URL('./earlybird.test.js', import.meta.url));
+    const videoAsset = { id: 'a1', postId: post.id, kind: 'video', sourceUrl: 'https://x.com/video', localPath: fixturePath, metadata: { posterPath: fixturePath, keyframes: [fixturePath, 'missing-frame.jpg'] } };
     const unrelatedImage = { id: 'a2', postId: post.id, kind: 'image', sourceUrl: 'https://pbs.twimg.com/media/unrelated.jpg', localPath: 'unrelated.jpg', metadata: { tweetId: '999' } };
     const primaryEvidence = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', '1-evidence.png');
     const relatedEvidence = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', '2-evidence.png');
@@ -431,7 +433,7 @@ describe('event story pipeline', () => {
       if (system.includes('微信公众号总编辑')) return { publish: true, contentType: 'event', newsworthiness: 90, relatedPostIds: ['p2'], reason: '同一发布事件', searchQueries: [] };
       if (user.includes('"availableVisuals"')) writerVisuals = JSON.parse(user).availableVisuals;
       const detail = '两条官方动态构成同一事件，并提供了明确的发布范围与后续观察线索。'.repeat(35);
-      const markdown = `事实钩子。\n\n## 第一条线索\n\n${detail}\n\n![主帖截图](${primaryEvidence})\n\n### 发布范围\n\n${detail}\n\n![相关帖截图](${relatedEvidence})\n\n## 接下来要看什么\n\n${detail}\n\n![视频封面](poster.jpg)`;
+      const markdown = `事实钩子。\n\n## 第一条线索\n\n${detail}\n\n![主帖截图](${primaryEvidence})\n\n### 发布范围\n\n${detail}\n\n![相关帖截图](${relatedEvidence})\n\n## 接下来要看什么\n\n${detail}\n\n![视频封面](${fixturePath})`;
       if (system.includes('Humanizer-zh')) return { markdown, score: 48 };
       return { title: '合并后的官方动态', digest: '两条官方动态构成同一事件。', markdown };
     }) };
@@ -458,6 +460,7 @@ describe('event story pipeline', () => {
       expect(prisma.earlyBirdArticleJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'merged' } }));
       expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ tweetUrl: related.sourceUrl, postId: related.postId, showTranslation: false }));
       expect(writerVisuals.map(asset => asset.localPath)).not.toContain('unrelated.jpg');
+      expect(writerVisuals.map(asset => asset.localPath)).not.toContain('missing-frame.jpg');
     } finally {
       if (originalThreadWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
       else process.env.EARLYBIRD_THREAD_WAIT_MS = originalThreadWait;
