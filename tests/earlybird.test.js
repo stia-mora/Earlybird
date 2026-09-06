@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cacheScraperFactory, configuredXCookies, createSourceMonitor, mergeCookieHeaders, retryAtFromRateLimit } from '../src/earlybird/sourceMonitor.js';
@@ -18,6 +20,7 @@ import { enqueueInterruptedJobs } from '../src/earlybird/jobRecovery.js';
 import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
 import { availableFixedEndVisuals } from '../src/earlybird/fixedEndVisuals.js';
+import { buildCoverPrompt, createCoverImageGenerator, WECHAT_COVER_SIZE } from '../src/earlybird/coverImage.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -562,5 +565,136 @@ describe('multimodal fallback', () => {
       'https://primary.test/v1/chat/completions',
       'https://backup.test/v1/chat/completions',
     ]);
+  });
+});
+
+describe('WeChat cover generation', () => {
+  it('writes a pure-visual prompt and uses the fallback image model after the primary model fails', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'earlybird-cover-'));
+    const normalize = vi.fn(async ({ outputPath }) => { await writeFile(outputPath, 'normalized-cover'); return outputPath; });
+    const calls = [];
+    const fetchImpl = vi.fn(async (_url, options = {}) => {
+      const request = JSON.parse(options.body);
+      calls.push(request);
+      if (request.model === 'primary-model') return new Response(JSON.stringify({ error: { message: 'primary unavailable' } }), { status: 503 });
+      return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from('image-bytes').toString('base64') }] }), { status: 200 });
+    });
+    const generator = createCoverImageGenerator({
+      apiKey: 'primary-key', baseUrl: 'https://images.test/v1', model: 'primary-model',
+      fallbackModel: 'fallback-model', outputDir, fetchImpl, normalize,
+    });
+
+    const cover = await generator.generate({ postId: '123', title: '模型发布新功能', digest: '官方公布了新的模型能力。', analysis: { facts: ['新功能面向开发者开放。'] }, editorial: { contentType: 'brief' } });
+
+    expect(calls.map(call => call.model)).toEqual(['primary-model', 'fallback-model']);
+    expect(cover).toMatchObject({ status: 'generated', model: 'fallback-model', width: 900, height: 383, aspect: '2.35:1' });
+    expect(normalize).toHaveBeenCalledWith(expect.objectContaining({ outputPath: cover.localPath }));
+    await expect(readFile(cover.promptPath, 'utf8')).resolves.toContain('text = none');
+    await expect(readFile(cover.promptPath, 'utf8')).resolves.toContain('900x383px');
+  });
+
+  it('accepts an image URL response and reuses an existing generated cover', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'earlybird-cover-'));
+    const normalize = vi.fn(async ({ outputPath }) => { await writeFile(outputPath, 'normalized-cover'); return outputPath; });
+    const fetchImpl = vi.fn(async (url, options = {}) => {
+      if (options.method === 'POST') return new Response(JSON.stringify({ data: [{ url: 'https://cdn.test/cover.png' }] }), { status: 200 });
+      if (url === 'https://cdn.test/cover.png') return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const generator = createCoverImageGenerator({ apiKey: 'key', baseUrl: 'https://images.test/v1', outputDir, fetchImpl, normalize });
+
+    const cover = await generator.generate({ postId: '456', title: '新进展', editorial: { contentType: 'event' } });
+    const reused = await generator.generate({ postId: '456', title: '新进展', editorial: { contentType: 'event' }, previous: cover });
+
+    expect(reused).toMatchObject({ localPath: cover.localPath, reused: true });
+    expect(fetchImpl.mock.calls).toHaveLength(2);
+  });
+
+  it('uses a topic-specific visual prompt without asking the image model to render text', () => {
+    const prompt = buildCoverPrompt({ title: 'AI 代理进入生产环境', digest: '官方发布新的代理能力。', analysis: { facts: ['支持工具调用和审计。'] }, editorial: { contentType: 'explainer' } });
+    expect(prompt).toContain(`exact cinematic ${WECHAT_COVER_SIZE.aspect}`);
+    expect(prompt).toContain('AI 代理进入生产环境');
+    expect(prompt).toContain('Do not include any text');
+  });
+});
+
+function draftPipelineFixture(coverImageGenerator) {
+  const fixturePath = fileURLToPath(new URL('./earlybird.test.js', import.meta.url));
+  const post = { id: 'p-cover', postId: 'cover-post', authorUsername: 'thsottiaux', sourceUrl: 'https://x.com/thsottiaux/status/cover-post', text: 'Codex now supports the new ChatGPT model.', rawData: { id: 'cover-post', text: 'Codex now supports the new ChatGPT model.' }, createdAt: new Date('2026-09-05T00:00:00Z') };
+  const job = { id: 'j-cover', status: 'detected', metadata: {}, detectedAt: new Date('2026-09-05T00:05:00Z'), postId: post.id, sourceId: 's-cover', post, source: { handle: 'thsottiaux', website: 'https://openai.com' }, draft: null };
+  const sourceImage = { id: 'a-cover', postId: post.id, kind: 'image', sourceUrl: 'https://pbs.twimg.com/media/cover.jpg', localPath: fixturePath, metadata: { tweetId: post.postId } };
+  const updates = [];
+  const prisma = {
+    earlyBirdArticleJob: {
+      findUnique: vi.fn(async () => job),
+      update: vi.fn(async ({ data }) => { updates.push(data); return { ...job, ...data }; }),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
+    earlyBirdPost: { update: vi.fn(async () => post), findMany: vi.fn(async () => []) },
+    earlyBirdAsset: { findMany: vi.fn(async () => [sourceImage]), update: vi.fn(async () => sourceImage) },
+    earlyBirdDraft: { upsert: vi.fn(async ({ create }) => create) },
+  };
+  const body = '这是一段经过核查的官方技术更新，说明新能力的范围、使用方式和接下来值得关注的问题。'.repeat(4);
+  const llmClient = { complete: vi.fn(async ({ system }) => {
+    if (system.includes('微信公众号总编辑')) return { publish: true, contentType: 'brief', newsworthiness: 90, relatedPostIds: [], reason: '官方发布', searchQueries: [] };
+    if (system.includes('Humanizer-zh')) return { markdown: body, score: 48 };
+    return { title: '官方发布新能力', digest: '官方公布了新的技术能力。', markdown: body };
+  }) };
+  const wechatClient = {
+    uploadPermanentMaterial: vi.fn(async () => ({ media_id: 'thumb-media' })),
+    uploadArticleImage: vi.fn(async () => ({ url: 'https://wechat.test/article-image' })),
+    addDraft: vi.fn(async () => ({ media_id: 'draft-media' })),
+    getDraft: vi.fn(async () => ({ media_id: 'draft-media' })),
+  };
+  return {
+    pipeline: createArticlePipeline({
+      prisma,
+      scraperFactory: async () => ({ scrapeFullThread: async () => [post.rawData] }),
+      llmClient,
+      wechatClient,
+      mediaPipeline: { collect: vi.fn(async () => [sourceImage]) },
+      evidence: vi.fn(async () => ({})),
+      analyze: vi.fn(async () => ({ translation: '官方公告', digest: '官方公布了新的技术能力。', facts: ['新能力已经发布。'] })),
+      coverImageGenerator,
+      notifier: null,
+    }),
+    wechatClient,
+    updates,
+    sourceImage,
+  };
+}
+
+describe('cover image pipeline integration', () => {
+  it('uses the generated cover only for the WeChat thumbnail and stores its metadata', async () => {
+    const generatedCover = 'C:/generated-cover.jpg';
+    const coverImageGenerator = { generate: vi.fn(async () => ({ status: 'generated', localPath: generatedCover, model: 'primary-model', width: 900, height: 383 })) };
+    const { pipeline, wechatClient, updates } = draftPipelineFixture(coverImageGenerator);
+    const originalWait = process.env.EARLYBIRD_THREAD_WAIT_MS;
+    process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
+    try {
+      await expect(pipeline.process('j-cover')).resolves.toMatchObject({ status: 'verified' });
+      expect(wechatClient.uploadPermanentMaterial).toHaveBeenCalledWith(generatedCover, 'thumb');
+      expect(wechatClient.uploadArticleImage).not.toHaveBeenCalledWith(generatedCover);
+      expect(wechatClient.addDraft.mock.calls[0][0].content).not.toContain(generatedCover);
+      expect(updates.some(update => update.metadata?.cover?.localPath === generatedCover)).toBe(true);
+    } finally {
+      if (originalWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
+      else process.env.EARLYBIRD_THREAD_WAIT_MS = originalWait;
+    }
+  });
+
+  it('falls back to the original post image when cover generation fails', async () => {
+    const coverImageGenerator = { generate: vi.fn(async () => { throw new Error('both image models unavailable'); }) };
+    const { pipeline, wechatClient, sourceImage, updates } = draftPipelineFixture(coverImageGenerator);
+    const originalWait = process.env.EARLYBIRD_THREAD_WAIT_MS;
+    process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
+    try {
+      await expect(pipeline.process('j-cover')).resolves.toMatchObject({ status: 'verified' });
+      expect(wechatClient.uploadPermanentMaterial).toHaveBeenCalledWith(sourceImage.localPath, 'thumb');
+      expect(updates.some(update => update.metadata?.cover?.status === 'source-fallback')).toBe(true);
+    } finally {
+      if (originalWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
+      else process.env.EARLYBIRD_THREAD_WAIT_MS = originalWait;
+    }
   });
 });

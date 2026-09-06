@@ -12,6 +12,7 @@ import { classifyEditorial } from './editorialClassifier.js';
 import { collectResearchImages, researchOfficialSources } from './researchBrowser.js';
 import { createHermesNotifier } from './hermesNotifier.js';
 import { availableFixedEndVisuals } from './fixedEndVisuals.js';
+import { createCoverImageGenerator } from './coverImage.js';
 
 const MERGEABLE_STATUSES = ['detected', 'classified', 'held', 'captured', 'failed'];
 
@@ -88,7 +89,7 @@ function videoPosterPath(assets) {
   return video?.metadata?.posterPath || video?.metadata?.keyframes?.find(Boolean);
 }
 
-export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, notifier = createHermesNotifier({ prisma }), logger = console } = {}) {
+export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, notifier = createHermesNotifier({ prisma }), coverImageGenerator = createCoverImageGenerator(), logger = console } = {}) {
   const writer = createArticleWriter({ client: llmClient });
   return {
     async process(jobId, { force = false } = {}) {
@@ -173,9 +174,17 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
           return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html } });
         }
         const visualAssets = [...articleVisualAssets(articleAssets), ...endVisuals];
-        let thumb = null;
-        if (visualAssets[0]) thumb = await wechatClient.uploadPermanentMaterial(visualAssets[0].localPath, 'thumb');
-        else thumb = await wechatClient.uploadPermanentMaterial(evidencePath, 'thumb');
+        let cover;
+        try {
+          cover = await coverImageGenerator.generate({ postId: job.post.postId, title: article.title, digest: article.digest, analysis, editorial, previous: analysisMetadata.cover });
+        } catch (error) {
+          logger.warn?.('EarlyBird cover generation failed; using the original media', job.id, error.message);
+        }
+        const coverMetadata = cover || { status: 'source-fallback', reason: 'cover image generation failed' };
+        const metadataWithCover = { ...analysisMetadata, cover: coverMetadata };
+        await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'humanized', metadata: metadataWithCover } });
+        const thumbPath = cover?.localPath || visualAssets[0]?.localPath || evidencePath;
+        const thumb = await wechatClient.uploadPermanentMaterial(thumbPath, 'thumb');
         for (const asset of visualAssets) {
           const uploaded = await wechatClient.uploadArticleImage(asset.localPath);
           if (uploaded.url) assetUrls.set(asset.localPath, uploaded.url);
@@ -189,14 +198,14 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const renderedEndVisuals = endVisuals.map(asset => ({ ...asset, src: assetUrls.get(asset.localPath) || asset.localPath }));
         const html = await renderGzhMarkdown(markdownForRender, { title: article.title, digest: article.digest, contentType: editorial.contentType, references, endVisuals: renderedEndVisuals });
         await validateGzhHtml(html);
-        await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html } });
+        await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html, metadata: metadataWithCover } });
         const draft = await wechatClient.addDraft({ title: article.title.slice(0, 64), author: process.env.WECHAT_AUTHOR || '', digest: article.digest?.slice(0, 120), content: html, content_source_url: '', thumb_media_id: thumb?.media_id || '' });
         const verified = await wechatClient.getDraft(draft.media_id);
         if (!verified?.news_item && !verified?.media_id) throw new Error('WeChat draft verification returned no article');
-        const storedDraft = await prisma.earlyBirdDraft.upsert({ where: { jobId: job.id }, update: { mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl } }, create: { jobId: job.id, mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl } } });
+        const storedDraft = await prisma.earlyBirdDraft.upsert({ where: { jobId: job.id }, update: { mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl, cover: { status: coverMetadata.status, model: coverMetadata.model, width: coverMetadata.width, height: coverMetadata.height } } }, create: { jobId: job.id, mediaId: draft.media_id, verification: verified, verified: Boolean(verified?.news_item || verified?.media_id), requestSummary: { title: article.title, sourceUrl: job.post.sourceUrl, cover: { status: coverMetadata.status, model: coverMetadata.model, width: coverMetadata.width, height: coverMetadata.height } } } });
         const completedJob = await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'verified' } });
         try {
-          await notifier?.draftReady({ job: { ...job, ...completedJob, metadata: analysisMetadata }, draft: storedDraft, source: job.source, post: job.post, manualVideoFiles: manualVideos.map(asset => basename(asset.localPath)) });
+          await notifier?.draftReady({ job: { ...job, ...completedJob, metadata: metadataWithCover }, draft: storedDraft, source: job.source, post: job.post, manualVideoFiles: manualVideos.map(asset => basename(asset.localPath)) });
         } catch (notificationError) {
           logger.warn?.('EarlyBird draft notification failed', job.id, notificationError.message);
         }

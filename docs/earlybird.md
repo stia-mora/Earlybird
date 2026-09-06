@@ -25,7 +25,7 @@
 
 ## 媒体和合规
 
-图片会下载、hash 去重并通过 `media/uploadimg` 上传；首图作为封面通过 `material/add_material` 上传。视频转码为 H.264/AAC，生成封面和关键帧，但不再自动上传至微信素材库。原始 MP4 会保留在 `data/earlybird/media`，草稿通知会提示文件名供人工审核上传。正文仍使用封面、关键帧和视频摘要，不生成不稳定的 `<video>` 标签。
+图片会下载、hash 去重并通过 `media/uploadimg` 上传。每篇通过审稿的文章会在创建草稿前生成一张 `900×383`（2.35:1）的纯视觉公众号封面，并通过 `material/add_material` 作为草稿封面上传；封面不插入正文。封面提示词和图片保存在 `data/earlybird/media/covers/<post-id>/`，重试会复用有效封面，避免再次调用图像模型。图像主模型由 `EARLYBIRD_COVER_IMAGE_MODEL` 配置，失败时自动改用 `EARLYBIRD_COVER_IMAGE_FALLBACK_MODEL`；两者都不可用时，流水线回退到原帖首图或证据截图，仍继续创建草稿。视频转码为 H.264/AAC，生成封面和关键帧，但不再自动上传至微信素材库。原始 MP4 会保留在 `data/earlybird/media`，草稿通知会提示文件名供人工审核上传。正文仍使用原帖图片、关键帧和视频摘要，不生成不稳定的 `<video>` 标签。
 
 文末紧跟在参考资料之后使用固定的栏目尾图。图片为 `data/earlybird/media/fixed-end/earlybird-endcard.png`，后续所有草稿会自动上传并插入文末。图片缺失时不会插入占位图。
 

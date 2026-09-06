@@ -20,7 +20,7 @@
     ['failed', '失败', 'red'],
     ['ignored', '已忽略', 'muted'],
   ];
-  const readiness = [['xCookies', 'X Cookie', '允许采集器读取来源'], ['llm', '多模态模型', '翻译、摘要和选题判断'], ['wechat', '微信公众号', '创建和回读草稿'], ['redis', 'Redis 队列', '调度采集与文章任务'], ['mediaDir', '媒体目录', '保存证据和视频素材']];
+  const readiness = [['xCookies', 'X Cookie', '允许采集器读取来源'], ['llm', '多模态模型', '翻译、摘要和选题判断'], ['coverImage', '封面图服务', '生成 900×383 公众号专属封面'], ['wechat', '微信公众号', '创建和回读草稿'], ['redis', 'Redis 队列', '调度采集与文章任务'], ['mediaDir', '媒体目录', '保存证据和视频素材']];
   let timer;
 
   const $ = id => document.getElementById(id);
