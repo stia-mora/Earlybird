@@ -1,5 +1,6 @@
 import express from 'express';
 import Bull from 'bull';
+import { existsSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth.js';
 import { createArticlePipeline } from '../../src/earlybird/pipeline.js';
@@ -30,6 +31,78 @@ async function enqueueArticleProcess(jobId) {
   await queue.add('process', { jobId }, { jobId: queueJobId, removeOnComplete: 100, removeOnFail: 100 });
 }
 router.use(authMiddleware);
+
+function startOfToday() {
+  const value = new Date();
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function serviceStatus(lastPolledAt, pollIntervalSeconds) {
+  if (!lastPolledAt) return { state: 'waiting', label: '等待首次轮询' };
+  const ageMs = Date.now() - new Date(lastPolledAt).getTime();
+  const staleAfterMs = Math.max(60_000, Number(pollIntervalSeconds || 60) * 2_000);
+  if (ageMs > staleAfterMs) return { state: 'stale', label: '轮询已变慢' };
+  return { state: 'healthy', label: '采集正常' };
+}
+
+router.get('/overview', async (_req, res) => {
+  try {
+    const today = startOfToday();
+    const [sources, postsToday, jobsToday, jobs, polls, notifications, jobGroups, drafts, verifiedDrafts] = await Promise.all([
+      prisma.earlyBirdSource.findMany({ orderBy: { handle: 'asc' }, select: { id: true, handle: true, displayName: true, enabled: true, baselineComplete: true, pollIntervalSeconds: true, lastPolledAt: true, lastError: true, updatedAt: true } }),
+      prisma.earlyBirdPost.count({ where: { capturedAt: { gte: today } } }),
+      prisma.earlyBirdArticleJob.count({ where: { detectedAt: { gte: today } } }),
+      prisma.earlyBirdArticleJob.findMany({ take: 30, orderBy: { updatedAt: 'desc' }, include: { source: { select: { handle: true, displayName: true } }, post: { select: { postId: true, text: true, sourceUrl: true, capturedAt: true } }, draft: { select: { verified: true, failureReason: true, mediaId: true } } } }),
+      prisma.earlyBirdPoll.findMany({ take: 20, orderBy: { polledAt: 'desc' }, include: { source: { select: { handle: true, displayName: true } } } }),
+      prisma.earlyBirdNotification.findMany({ take: 20, orderBy: { createdAt: 'desc' } }),
+      prisma.earlyBirdArticleJob.groupBy({ by: ['status'], _count: { _all: true } }),
+      prisma.earlyBirdDraft.count(),
+      prisma.earlyBirdDraft.count({ where: { verified: true } }),
+    ]);
+
+    const enabledSources = sources.filter(source => source.enabled);
+    const sourceStates = sources.map(source => ({
+      ...source,
+      status: source.enabled ? serviceStatus(source.lastPolledAt, source.pollIntervalSeconds) : { state: 'disabled', label: '已停用' },
+    }));
+    const activeStates = sourceStates.filter(source => source.enabled).map(source => source.status.state);
+    const workerState = !enabledSources.length
+      ? { state: 'not_configured', label: '尚未配置来源' }
+      : activeStates.includes('stale')
+        ? { state: 'stale', label: '需要检查采集器' }
+        : activeStates.includes('waiting')
+          ? { state: 'waiting', label: '等待采集器首次回报' }
+          : { state: 'healthy', label: '采集器运行中' };
+
+    const counts = Object.fromEntries(jobGroups.map(group => [group.status, group._count._all]));
+    const attention = jobs
+      .filter(job => ['failed', 'manual_review', 'held', 'detected', 'captured', 'ignored'].includes(job.status) || job.error || job.draft?.failureReason)
+      .slice(0, 8)
+      .map(job => ({ id: job.id, status: job.status, error: job.error || job.draft?.failureReason || null, source: job.source?.displayName || job.source?.handle || '未知来源', text: job.post?.text || '', updatedAt: job.updatedAt }));
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      system: { api: { state: 'healthy', label: 'API 在线' }, worker: workerState },
+      config: {
+        xCookies: Boolean(process.env.X_COOKIES || process.env.TWITTER_COOKIES || process.env.EARLYBIRD_X_COOKIES_FILE),
+        llm: Boolean(process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY),
+        wechat: Boolean(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET),
+        redis: Boolean(process.env.REDIS_URL || process.env.REDIS_HOST),
+        mediaDir: existsSync(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media'),
+      },
+      metrics: { sources: sources.length, enabledSources: enabledSources.length, postsToday, jobsToday, drafts, verifiedDrafts },
+      pipeline: counts,
+      sources: sourceStates,
+      jobs,
+      polls,
+      notifications,
+      attention,
+    });
+  } catch (error) {
+    res.status(503).json({ error: `EarlyBird overview unavailable: ${error.message}` });
+  }
+});
 
 function validWebsite(value) {
   if (value == null || value === '') return true;

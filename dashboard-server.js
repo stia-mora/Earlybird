@@ -24,6 +24,10 @@ app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(DASHBOARD_DIR, 'index.html'));
 });
 
+app.get('/earlybird', (req, res) => {
+  res.sendFile(path.join(DASHBOARD_DIR, 'earlybird.html'));
+});
+
 app.get('/pricing', (req, res) => {
   res.sendFile(path.join(DASHBOARD_DIR, 'pricing.html'));
 });

@@ -60,6 +60,7 @@
     { href: '/monitor', label: 'Monitor', icon: icons.monitor },
     { href: '/unfollowers', label: 'Unfollowers', icon: icons.unfollowers },
     // Content & Media
+    { href: '/earlybird', label: 'EarlyBird Pulse', icon: icons.monitor },
     { href: '/video', label: 'Video', icon: icons.video },
     { href: '/thread', label: 'Thread Reader', icon: icons.threads },
     { href: '/thread-composer', label: 'Threads', icon: icons.threadComposer },

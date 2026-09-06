@@ -375,6 +375,9 @@ export function createApp({ rateLimiting = true } = {}) {
   app.get('/graph', (req, res) => {
     res.sendFile(path.join(__dirname, '../dashboard/graph.html'));
   });
+  app.get('/earlybird', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dashboard/earlybird.html'));
+  });
   // Documentation sub-pages — serves 167 auto-generated SEO pages
   const docsBasePath = path.resolve(__dirname, '../dashboard/docs');
 
