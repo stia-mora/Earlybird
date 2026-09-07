@@ -20,7 +20,7 @@ import { enqueueInterruptedJobs } from '../src/earlybird/jobRecovery.js';
 import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
 import { availableFixedEndVisuals } from '../src/earlybird/fixedEndVisuals.js';
-import { buildCoverPrompt, createCoverImageGenerator, WECHAT_COVER_SIZE } from '../src/earlybird/coverImage.js';
+import { buildCoverPrompt, createCoverImageGenerator, normalizeCoverImage, WECHAT_COVER_SIZE } from '../src/earlybird/coverImage.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -569,6 +569,19 @@ describe('multimodal fallback', () => {
 });
 
 describe('WeChat cover generation', () => {
+  it('keeps the required odd 900x383 size by encoding JPEG in 4:4:4', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'earlybird-cover-normalize-'));
+    const outputPath = join(outputDir, 'cover.jpg');
+    const run = vi.fn(async () => { await writeFile(outputPath, 'normalized-cover'); });
+
+    await normalizeCoverImage({ sourcePath: join(outputDir, 'source.png'), outputPath, run });
+
+    expect(run).toHaveBeenCalledWith('ffmpeg', expect.arrayContaining([
+      '-vf', `scale=${WECHAT_COVER_SIZE.width}:${WECHAT_COVER_SIZE.height}:force_original_aspect_ratio=increase,crop=${WECHAT_COVER_SIZE.width}:${WECHAT_COVER_SIZE.height}`,
+      '-pix_fmt', 'yuvj444p',
+    ]), { windowsHide: true });
+  });
+
   it('writes a pure-visual prompt and uses the fallback image model after the primary model fails', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'earlybird-cover-'));
     const normalize = vi.fn(async ({ outputPath }) => { await writeFile(outputPath, 'normalized-cover'); return outputPath; });
