@@ -20,8 +20,8 @@ function compact(value, maximum = 88) {
 
 function excludedReason(job) {
   if (!job) return '未进入文章处理队列';
-  if (job.status === 'ignored') return `编辑筛选：${compact(job.metadata?.editorial?.reason || '该帖不适合独立制作公众号内容', 120)}`;
-  if (job.status === 'merged') return '已并入同一事件的主稿';
+  if (job.status === 'ignored') return `旧版筛选历史：${compact(job.metadata?.editorial?.reason || '该帖未按旧版规则独立制作', 120)}`;
+  if (job.status === 'merged') return '旧版事件合并历史';
   if (job.status === 'manual_review') return '质量审校要求人工处理';
   if (job.status === 'failed') return `处理失败：${compact(job.error || '未知错误', 100)}`;
   return `仍在处理中：${job.status}`;

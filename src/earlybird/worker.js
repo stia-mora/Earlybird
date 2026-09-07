@@ -78,17 +78,7 @@ async function sendDailySummary() {
 
 await monitor.ensureDefaults();
 queue.process('process', Number(process.env.EARLYBIRD_CONCURRENCY || 1), async job => {
-  const result = await pipeline.process(job.data.jobId);
-  const holdUntil = Date.parse(result?.metadata?.editorial?.holdUntil || '');
-  if (result?.status === 'held' && Number.isFinite(holdUntil)) {
-    await queue.add('process', { jobId: result.id }, {
-      jobId: `earlybird-article-release-${result.id}`,
-      delay: Math.max(0, holdUntil - Date.now()),
-      removeOnComplete: 100,
-      removeOnFail: 100,
-    });
-  }
-  return result;
+  return pipeline.process(job.data.jobId);
 });
 monitorQueue.process('poll', Number(process.env.EARLYBIRD_SOURCE_CONCURRENCY || 2), async job => {
   await waitForSourceRequestSlot();

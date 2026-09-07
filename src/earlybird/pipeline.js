@@ -8,20 +8,12 @@ import { captureEvidence } from './evidenceCapture.js';
 import { createMediaPipeline } from './mediaPipeline.js';
 import { articleVisualAssets, createArticleWriter } from './articleWriter.js';
 import { createWeChatClient } from './wechatClient.js';
-import { classifyEditorial } from './editorialClassifier.js';
-import { collectResearchImages, researchOfficialSources } from './researchBrowser.js';
 import { createHermesNotifier } from './hermesNotifier.js';
 import { availableFixedEndVisuals } from './fixedEndVisuals.js';
 import { createCoverImageGenerator } from './coverImage.js';
 
-const MERGEABLE_STATUSES = ['detected', 'classified', 'held', 'captured', 'failed'];
-
 function jobMetadata(job) {
   return job.metadata && typeof job.metadata === 'object' ? job.metadata : {};
-}
-
-function eventWindowMs() {
-  return Math.max(1, configuredNumber('EARLYBIRD_EVENT_WINDOW_MINUTES', 60)) * 60 * 1000;
 }
 
 function configuredNumber(name, fallback) {
@@ -96,70 +88,38 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
       const job = await prisma.earlyBirdArticleJob.findUnique({ where: { id: jobId }, include: { post: true, source: true, draft: true } });
       if (!job) throw new Error(`EarlyBird job not found: ${jobId}`);
       if (job.draft?.mediaId || (job.status === 'verified' && !force)) return job;
-      if (['ignored', 'merged'].includes(job.status) && !force) return job;
       const priorMetadata = jobMetadata(job);
-      const priorEditorial = priorMetadata.editorial || {};
       try {
         const scraper = await scraperFactory(job.source);
         const thread = await assembleThread({
           scraper,
           post: job.post,
-          waitMs: job.status === 'held' ? 0 : Math.max(0, configuredNumber('EARLYBIRD_THREAD_WAIT_MS', 90000)),
+          waitMs: Math.max(0, configuredNumber('EARLYBIRD_THREAD_WAIT_MS', 90000)),
           timeoutMs: Math.max(1000, configuredNumber('EARLYBIRD_THREAD_TIMEOUT_MS', 60000)),
         });
         await prisma.earlyBirdPost.update({ where: { id: job.postId }, data: { threadData: thread } });
-        const detectedAt = job.detectedAt ? new Date(job.detectedAt) : new Date();
-        const recentPosts = await prisma.earlyBirdPost.findMany({
-          where: { id: { not: job.postId }, createdAt: { gte: new Date(detectedAt.getTime() - eventWindowMs()), lte: detectedAt } },
-          include: { source: { select: { handle: true, website: true } }, jobs: { select: { id: true, status: true, metadata: true } } },
-          orderBy: { createdAt: 'desc' },
-          take: 40,
-        });
-        const editorial = await classifyEditorial({ client: llmClient, post: job.post, source: job.source, thread, recentPosts });
+        const editorial = {
+          contentType: 'brief',
+          publish: true,
+          reason: '所有新捕获内容均直接进入公众号写作。',
+          newsworthiness: null,
+          relatedPostIds: [],
+          searchQueries: [],
+        };
         const editorialMetadata = { ...priorMetadata, editorial };
-        await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'classified', attempts: { increment: 1 }, error: null, metadata: editorialMetadata } });
-        if (!editorial.publish) return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'ignored', metadata: editorialMetadata } });
-
-        const relatedPosts = recentPosts.filter(item => editorial.relatedPostIds.includes(item.id));
-        const storyPosts = [job.post, ...relatedPosts];
-        if (editorial.contentType === 'event' && relatedPosts.length) {
-          await prisma.earlyBirdArticleJob.updateMany({
-            where: { postId: { in: relatedPosts.map(item => item.id) }, status: { in: MERGEABLE_STATUSES } },
-            data: { status: 'merged' },
-          });
-        }
-        await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'captured', metadata: editorialMetadata } });
+        await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'captured', attempts: { increment: 1 }, error: null, metadata: editorialMetadata } });
+        const storyPosts = [job.post];
         const evidencePath = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', `${job.post.postId}-evidence.png`);
         const assets = await collectAssets({ prisma, mediaPipeline, post: job.post, thread });
-        const relatedAssets = [];
-        const relatedEvidenceAssets = [];
-        for (const relatedPost of relatedPosts) {
-          const relatedThread = Array.isArray(relatedPost.threadData) && relatedPost.threadData.length
-            ? relatedPost.threadData
-            : [relatedPost.rawData];
-          const collectedRelatedAssets = await collectAssets({ prisma, mediaPipeline, post: relatedPost, thread: relatedThread });
-          relatedAssets.push(...collectedRelatedAssets);
-          const relatedEvidencePath = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', `${relatedPost.postId}-evidence.png`);
-          try {
-            await evidence({ tweetUrl: relatedPost.sourceUrl, postId: relatedPost.postId, translation: '', showTranslation: false, mediaPosterPath: videoPosterPath(collectedRelatedAssets), outputPath: relatedEvidencePath, thread: relatedThread });
-            relatedEvidenceAssets.push(postEvidenceAsset(relatedPost, relatedEvidencePath));
-          } catch (error) {
-            logger.warn?.('EarlyBird related X evidence was unavailable', relatedPost.postId, error.message);
-          }
-        }
-        const websites = [...new Set([...storyPosts.map(item => item.source?.website), job.source.website].filter(Boolean))];
-        const research = editorial.contentType === 'brief'
-          ? { citations: [], images: [], queries: [], allowedHosts: [] }
-          : await researchOfficialSources({ queries: editorial.searchQueries, websites, logger });
-        const researchAssets = await collectResearchImages({ research, post: job.post, prisma, logger });
-        const allAssets = [...assets, ...relatedAssets, ...researchAssets];
+        const research = { citations: [], images: [], queries: [], allowedHosts: [] };
+        const allAssets = assets;
         await evidence({ tweetUrl: job.post.sourceUrl, postId: job.post.postId, translation: '', mediaPosterPath: videoPosterPath(assets), outputPath: evidencePath, thread });
         const analysisPost = { ...job.post.rawData, text: job.post.text, storyPosts: storyPosts.map(item => ({ author: item.authorUsername, createdAt: item.createdAt, url: item.sourceUrl, text: item.text })) };
         const analysis = await analyze({ client: llmClient, post: analysisPost, thread, assets: allAssets, evidencePath });
         const analysisMetadata = { ...editorialMetadata, analysis, research: { citations: research.citations, queries: research.queries } };
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'analyzed', metadata: analysisMetadata } });
         await evidence({ tweetUrl: job.post.sourceUrl, postId: job.post.postId, translation: analysis.translation, mediaPosterPath: videoPosterPath(assets), outputPath: evidencePath, thread });
-        const articleAssets = [...allAssets, postEvidenceAsset(job.post, evidencePath), ...relatedEvidenceAssets];
+        const articleAssets = [...allAssets, postEvidenceAsset(job.post, evidencePath)];
         const references = articleReferences(storyPosts, research);
         const article = await writer.write({ post: job.post, thread, analysis, editorial, storyPosts, research: { ...research, assets: allAssets.filter(asset => asset.kind === 'image').map(asset => ({ path: asset.localPath, sourceUrl: asset.sourceUrl, altText: asset.metadata?.altText || '' })) }, assets: articleAssets, sourceUrl: job.post.sourceUrl });
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'written', markdown: article.markdown } });

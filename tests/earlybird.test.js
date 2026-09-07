@@ -11,8 +11,6 @@ import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { assertGzhTypography, renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
 import { createWeChatClient } from '../src/earlybird/wechatClient.js';
 import { comparePosts, DEFAULT_SOURCES, fullWidthPunctuation } from '../src/earlybird/utils.js';
-import { classifyEditorial, normalizeEditorialDecision } from '../src/earlybird/editorialClassifier.js';
-import { isOfficialUrl, normalizeSearchQueries, officialHosts } from '../src/earlybird/researchBrowser.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline } from '../src/earlybird/pipeline.js';
 import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH, sanitizeEditorialMarkdown, varyEditorialParagraphs } from '../src/earlybird/articleWriter.js';
@@ -180,7 +178,7 @@ describe('EarlyBird Hermes notifications', () => {
     expect(body).toContain('2-video.mp4');
   });
 
-  it('summarizes today’s drafts and why the remaining posts were not produced', async () => {
+  it('summarizes today’s drafts and legacy jobs that were filtered before the policy change', async () => {
     const prisma = {
       earlyBirdSource: { findMany: vi.fn(async () => [{ id: 's1', handle: 'openai' }, { id: 's2', handle: 'geminiapp' }]) },
       earlyBirdPost: { findMany: vi.fn(async () => [
@@ -191,8 +189,8 @@ describe('EarlyBird Hermes notifications', () => {
     };
     const summary = await buildDailySummary({ prisma, now: new Date('2026-09-05T12:00:00Z') });
     expect(summary).toMatchObject({ detectedPosts: 3, verifiedDrafts: 1 });
-    expect(summary.message).toContain('编辑筛选');
-    expect(summary.message).toContain('已并入同一事件的主稿');
+    expect(summary.message).toContain('旧版筛选历史');
+    expect(summary.message).toContain('旧版事件合并历史');
   });
 });
 
@@ -384,51 +382,7 @@ describe('fixed end visuals', () => {
   });
 });
 
-describe('editorial triage', () => {
-  const source = { handle: 'thsottiaux', website: 'https://openai.com' };
-  const tiboPost = { id: 'p1', postId: '1', authorUsername: 'thsottiaux', text: 'Codex reset is now available for ChatGPT users.', sourceUrl: 'https://x.com/thsottiaux/status/1' };
-
-  it('allows only the configured Tibo Codex reset or model-support brief', () => {
-    const allowed = normalizeEditorialDecision({ publish: true, contentType: 'brief', newsworthiness: 90, reason: '产品变更' }, { post: tiboPost, source });
-    const bankedReset = normalizeEditorialDecision({ publish: true, contentType: 'explainer', newsworthiness: 90, reason: '配额补偿' }, { post: { ...tiboPost, text: 'A banked reset lands today.' }, source });
-    const denied = normalizeEditorialDecision({ publish: true, contentType: 'brief', newsworthiness: 90 }, { post: { ...tiboPost, text: 'A nice day at OpenAI.' }, source });
-    expect(allowed.contentType).toBe('brief');
-    expect(bankedReset.contentType).toBe('brief');
-    expect(denied.contentType).toBe('ignore');
-  });
-
-  it('recognizes Tibo by the actual post author when a source uses an internal alias', () => {
-    const decision = normalizeEditorialDecision(
-      { publish: true, contentType: 'brief', newsworthiness: 90, reason: '配额补偿' },
-      { post: { ...tiboPost, text: 'A banked reset lands today.' }, source: { ...source, handle: 'ebtibo' } },
-    );
-    expect(decision).toMatchObject({ contentType: 'brief', publish: true });
-  });
-
-  it('never turns replies or comments into an article', () => {
-    const decision = normalizeEditorialDecision({ publish: true, contentType: 'explainer', newsworthiness: 99 }, { post: { ...tiboPost, rawData: { inReplyTo: { id: '0' } } }, source });
-    expect(decision).toMatchObject({ contentType: 'ignore', publish: false });
-  });
-
-  it('requires a real candidate post before accepting an event story', () => {
-    const post = { id: 'p1', text: 'launch' };
-    const recentPosts = [{ id: 'p2', text: 'follow-up' }];
-    const missing = normalizeEditorialDecision({ publish: true, contentType: 'event', newsworthiness: 90, relatedPostIds: ['missing'] }, { post, source: { handle: 'openai' }, recentPosts });
-    const linked = normalizeEditorialDecision({ publish: true, contentType: 'event', newsworthiness: 90, relatedPostIds: ['p2'] }, { post, source: { handle: 'openai' }, recentPosts });
-    expect(missing.contentType).toBe('explainer');
-    expect(linked).toMatchObject({ contentType: 'event', relatedPostIds: ['p2'] });
-  });
-
-  it('passes only recent candidate summaries to the classifier', async () => {
-    const client = { complete: vi.fn(async () => ({ publish: true, contentType: 'brief', newsworthiness: 90, reason: 'Codex reset' })) };
-    await classifyEditorial({ client, post: tiboPost, source, recentPosts: [{ id: 'p2', authorUsername: 'openai', text: 'candidate' }] });
-    const payload = JSON.parse(client.complete.mock.calls[0][0].user);
-    expect(payload.recentCandidates).toEqual([expect.objectContaining({ id: 'p2', text: 'candidate' })]);
-    expect(client.complete.mock.calls[0][0].system).toContain('判别必须自洽');
-  });
-});
-
-describe('controlled evidence and research', () => {
+describe('controlled evidence', () => {
   it('translates the configured cookie header into X browser cookies', () => {
     expect(xBrowserCookies('auth_token=a; ct0=b')).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'auth_token', value: 'a', url: 'https://x.com/' }),
@@ -440,37 +394,25 @@ describe('controlled evidence and research', () => {
     expect(() => assertTweetEvidence({ pageText: 'normal', articleText: '' })).toThrow(/empty/i);
     expect(() => assertTweetEvidence({ pageText: 'normal', articleText: 'target X post' })).not.toThrow();
   });
-  it('limits research to official HTTPS domains and bounded queries', () => {
-    const hosts = officialHosts(['https://openai.com', 'https://www.anthropic.com']);
-    expect(isOfficialUrl('https://cdn.openai.com/image.jpg', hosts)).toBe(true);
-    expect(isOfficialUrl('https://openai.com.evil.example/article', hosts)).toBe(false);
-    expect(isOfficialUrl('http://openai.com/article', hosts)).toBe(false);
-    expect(normalizeSearchQueries(['  Codex reset  ', '', 'Codex reset', 'x'.repeat(121)])).toEqual(['Codex reset']);
-  });
 });
 
-describe('event story pipeline', () => {
-  it('processes a requeued held job, merges an eligible candidate, and collects every story asset', async () => {
+describe('unfiltered article pipeline', () => {
+  it('writes every new post independently, including one previously ignored by editorial rules', async () => {
     const originalThreadWait = process.env.EARLYBIRD_THREAD_WAIT_MS;
     process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
-    const post = { id: 'p1', postId: '1', authorUsername: 'openai', sourceUrl: 'https://x.com/openai/status/1', text: 'Primary announcement', rawData: { id: '1', text: 'Primary announcement' }, createdAt: new Date('2026-09-05T00:00:00Z') };
-    const related = { id: 'p2', postId: '2', authorUsername: 'geminiapp', sourceUrl: 'https://x.com/geminiapp/status/2', text: 'Related official detail', rawData: { id: '2', text: 'Related official detail' }, createdAt: new Date('2026-09-05T00:10:00Z'), source: { handle: 'geminiapp', website: 'https://gemini.google.com' }, jobs: [] };
-    const job = { id: 'j1', status: 'held', metadata: { editorial: { holdUntil: '2099-01-01T00:00:00.000Z' } }, detectedAt: new Date('2026-09-05T00:20:00Z'), postId: post.id, sourceId: 's1', post, source: { handle: 'openai', website: 'https://openai.com' }, draft: null };
+    const post = { id: 'p1', postId: '1', authorUsername: 'openai', sourceUrl: 'https://x.com/openai/status/1', text: 'A reply with a small product update.', rawData: { id: '1', text: 'A reply with a small product update.', inReplyTo: { id: '0' } }, createdAt: new Date('2026-09-05T00:00:00Z') };
+    const job = { id: 'j1', status: 'ignored', metadata: {}, detectedAt: new Date('2026-09-05T00:20:00Z'), postId: post.id, sourceId: 's1', post, source: { handle: 'openai', website: 'https://openai.com' }, draft: null };
     const updates = [];
     const fixturePath = fileURLToPath(new URL('./earlybird.test.js', import.meta.url));
     const videoAsset = { id: 'a1', postId: post.id, kind: 'video', sourceUrl: 'https://x.com/video', localPath: fixturePath, metadata: { posterPath: fixturePath, keyframes: [fixturePath, 'missing-frame.jpg'] } };
     const unrelatedImage = { id: 'a2', postId: post.id, kind: 'image', sourceUrl: 'https://pbs.twimg.com/media/unrelated.jpg', localPath: 'unrelated.jpg', metadata: { tweetId: '999' } };
-    const primaryEvidence = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', '1-evidence.png');
-    const relatedEvidence = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', '2-evidence.png');
     const prisma = {
       earlyBirdArticleJob: {
         findUnique: vi.fn(async () => job),
         update: vi.fn(async ({ data }) => { updates.push(data); return { ...job, ...data }; }),
-        updateMany: vi.fn(async () => ({ count: 1 })),
       },
       earlyBirdPost: {
         update: vi.fn(async () => post),
-        findMany: vi.fn(async () => [related]),
       },
       earlyBirdAsset: {
         findMany: vi.fn(async ({ where }) => where.postId === post.id ? [videoAsset, unrelatedImage] : []),
@@ -480,12 +422,11 @@ describe('event story pipeline', () => {
     const evidence = vi.fn(async () => ({ path: 'evidence.png' }));
     let writerVisuals = [];
     const llmClient = { complete: vi.fn(async ({ system, user }) => {
-      if (system.includes('微信公众号总编辑')) return { publish: true, contentType: 'event', newsworthiness: 90, relatedPostIds: ['p2'], reason: '同一发布事件', searchQueries: [] };
       if (user.includes('"availableVisuals"')) writerVisuals = JSON.parse(user).availableVisuals;
-      const detail = '两条官方动态构成同一事件，并提供了明确的发布范围与后续观察线索。'.repeat(35);
-      const markdown = `事实钩子。\n\n## 第一条线索\n\n${detail}\n\n![主帖截图](${primaryEvidence})\n\n### 发布范围\n\n${detail}\n\n![相关帖截图](${relatedEvidence})\n\n## 接下来要看什么\n\n${detail}\n\n![视频封面](${fixturePath})`;
+      const detail = '这条官方回复确认了产品正在推进的一项新变化，并说明用户可以继续关注后续可用范围、具体上线节奏以及实际使用中的反馈。';
+      const markdown = `${detail}\n\n${detail}`;
       if (system.includes('Humanizer-zh')) return { markdown, score: 48 };
-      return { title: '合并后的官方动态', digest: '两条官方动态构成同一事件。', markdown };
+      return { title: '一条小更新也会成稿', digest: '每条新内容独立进入公众号写作。', markdown };
     }) };
     const pipeline = createArticlePipeline({
       prisma,
@@ -494,7 +435,7 @@ describe('event story pipeline', () => {
       wechatClient: null,
       mediaPipeline: { collect },
       evidence,
-      analyze: vi.fn(async () => ({ translation: '中文翻译', digest: '两条官方动态构成同一事件。', facts: ['两个官方账号先后发布关联信息。'] })),
+      analyze: vi.fn(async () => ({ translation: '中文翻译', digest: '一条小更新也会独立成稿。', facts: ['官方回复中确认了一项产品更新。'] })),
     });
 
     try {
@@ -502,13 +443,13 @@ describe('event story pipeline', () => {
 
       expect(result.status).toBe('rendered');
       expect(collect).toHaveBeenCalledWith(expect.objectContaining({ post }));
-      expect(collect).toHaveBeenCalledWith(expect.objectContaining({ post: related }));
       expect(prisma.earlyBirdAsset.findMany).toHaveBeenCalledWith({ where: { postId: post.id, localPath: { not: null } } });
-      expect(prisma.earlyBirdPost.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: expect.objectContaining({ createdAt: { gte: new Date('2026-09-04T23:20:00Z'), lte: new Date('2026-09-05T00:20:00Z') } }),
+      expect(updates).toContainEqual(expect.objectContaining({
+        status: 'captured',
+        metadata: expect.objectContaining({ editorial: expect.objectContaining({ publish: true, contentType: 'brief', relatedPostIds: [] }) }),
       }));
-      expect(prisma.earlyBirdArticleJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'merged' } }));
-      expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ tweetUrl: related.sourceUrl, postId: related.postId, showTranslation: false }));
+      expect(llmClient.complete.mock.calls.some(([request]) => request.system.includes('微信公众号总编辑'))).toBe(false);
+      expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ tweetUrl: post.sourceUrl, postId: post.postId }));
       expect(writerVisuals.map(asset => asset.localPath)).not.toContain('unrelated.jpg');
       expect(writerVisuals.map(asset => asset.localPath)).not.toContain('missing-frame.jpg');
     } finally {
@@ -641,15 +582,13 @@ function draftPipelineFixture(coverImageGenerator) {
     earlyBirdArticleJob: {
       findUnique: vi.fn(async () => job),
       update: vi.fn(async ({ data }) => { updates.push(data); return { ...job, ...data }; }),
-      updateMany: vi.fn(async () => ({ count: 0 })),
     },
-    earlyBirdPost: { update: vi.fn(async () => post), findMany: vi.fn(async () => []) },
+    earlyBirdPost: { update: vi.fn(async () => post) },
     earlyBirdAsset: { findMany: vi.fn(async () => [sourceImage]), update: vi.fn(async () => sourceImage) },
     earlyBirdDraft: { upsert: vi.fn(async ({ create }) => create) },
   };
   const body = '这是一段经过核查的官方技术更新，说明新能力的范围、使用方式和接下来值得关注的问题。'.repeat(4);
   const llmClient = { complete: vi.fn(async ({ system }) => {
-    if (system.includes('微信公众号总编辑')) return { publish: true, contentType: 'brief', newsworthiness: 90, relatedPostIds: [], reason: '官方发布', searchQueries: [] };
     if (system.includes('Humanizer-zh')) return { markdown: body, score: 48 };
     return { title: '官方发布新能力', digest: '官方公布了新的技术能力。', markdown: body };
   }) };

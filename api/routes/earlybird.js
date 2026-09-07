@@ -46,9 +46,9 @@ function serviceStatus(lastPolledAt, pollIntervalSeconds) {
 }
 
 function dashboardJobNote(job) {
-  if (job.status === 'ignored') return '已由选题规则筛选，未创建草稿。';
-  if (job.status === 'merged') return '已并入关联事件的主稿。';
-  if (job.status === 'held') return '正在等待关联官方消息以决定是否合并。';
+  if (job.status === 'ignored') return '旧版筛选留下的历史任务，重新处理后会直接进入写作。';
+  if (job.status === 'merged') return '旧版事件合并留下的历史任务，可单独重新处理。';
+  if (job.status === 'held') return '旧版等待合并留下的历史任务，可直接重新处理。';
   if (job.status === 'manual_review') return '自动审稿未通过，需要人工复核。';
   if (job.status === 'failed') return '流水线未完成，请登录后在任务详情中查看原因或重试。';
   if (job.status === 'verified') return '已创建并通过微信草稿回读校验。';
