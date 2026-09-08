@@ -3,7 +3,7 @@ import cron from 'node-cron';
 import { PrismaClient } from '@prisma/client';
 import { createArticlePipeline } from './pipeline.js';
 import { cacheScraperFactory, createSourceMonitor, defaultScraperFactory, retryAtFromRateLimit } from './sourceMonitor.js';
-import { enqueueInterruptedJobs } from './jobRecovery.js';
+import { enqueueInterruptedJobs, enqueueLegacyEditorialJobs } from './jobRecovery.js';
 import { pollIntervalMs, startupPollDelay } from './sourcePollTiming.js';
 import { buildDailySummary } from './dailySummary.js';
 import { createHermesNotifier } from './hermesNotifier.js';
@@ -108,6 +108,8 @@ async function scheduleSources() {
 await scheduleSources();
 const recoveredJobs = await enqueueInterruptedJobs({ prisma, queue });
 if (recoveredJobs) console.warn(`EarlyBird recovered ${recoveredJobs} interrupted article job(s)`);
+const legacyEditorialJobs = await enqueueLegacyEditorialJobs({ prisma, queue });
+if (legacyEditorialJobs) console.warn(`EarlyBird requeued ${legacyEditorialJobs} job(s) excluded by the previous editorial policy`);
 const dailySummaryTask = cron.schedule(process.env.EARLYBIRD_DAILY_SUMMARY_CRON || '0 21 * * *', () => {
   sendDailySummary().catch(error => console.error('EarlyBird daily summary failed', error.message));
 }, { timezone: 'Asia/Shanghai', noOverlap: true });

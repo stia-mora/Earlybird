@@ -14,7 +14,7 @@ import { comparePosts, DEFAULT_SOURCES, fullWidthPunctuation } from '../src/earl
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline } from '../src/earlybird/pipeline.js';
 import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH, sanitizeEditorialMarkdown, varyEditorialParagraphs } from '../src/earlybird/articleWriter.js';
-import { enqueueInterruptedJobs } from '../src/earlybird/jobRecovery.js';
+import { enqueueInterruptedJobs, enqueueLegacyEditorialJobs } from '../src/earlybird/jobRecovery.js';
 import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
 import { availableFixedEndVisuals } from '../src/earlybird/fixedEndVisuals.js';
@@ -225,6 +225,30 @@ describe('EarlyBird job recovery', () => {
       jobId: 'earlybird-article-recovery-j2-1000', delay: 11000,
     }));
   });
+
+  it('requeues jobs excluded by the previous editorial policy', async () => {
+    const prisma = {
+      earlyBirdArticleJob: {
+        findMany: vi.fn(async () => [{ id: 'j1' }, { id: 'j2' }]),
+        updateMany: vi.fn(async () => ({ count: 2 })),
+      },
+    };
+    const queue = { add: vi.fn(async () => {}) };
+
+    const requeued = await enqueueLegacyEditorialJobs({ prisma, queue, now: () => 1000 });
+
+    expect(requeued).toBe(2);
+    expect(prisma.earlyBirdArticleJob.findMany).toHaveBeenCalledWith({
+      where: { status: { in: ['ignored', 'merged', 'held'] }, draft: null },
+      select: { id: true },
+    });
+    expect(prisma.earlyBirdArticleJob.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['j1', 'j2'] } }, data: { status: 'detected', error: null },
+    });
+    expect(queue.add).toHaveBeenNthCalledWith(1, 'process', { jobId: 'j1' }, expect.objectContaining({
+      jobId: 'earlybird-article-policy-retry-j1-1000', delay: 10000,
+    }));
+  });
 });
 
 describe('thread assembly and humanizer', () => {
@@ -419,7 +443,8 @@ describe('unfiltered article pipeline', () => {
       },
     };
     const collect = vi.fn(async ({ post: target }) => []);
-    const evidence = vi.fn(async () => ({ path: 'evidence.png' }));
+    const evidence = vi.fn(async () => { throw new Error('X post card timed out'); });
+    const analyze = vi.fn(async () => ({ translation: '中文翻译', digest: '一条小更新也会独立成稿。', facts: ['官方回复中确认了一项产品更新。'] }));
     let writerVisuals = [];
     const llmClient = { complete: vi.fn(async ({ system, user }) => {
       if (user.includes('"availableVisuals"')) writerVisuals = JSON.parse(user).availableVisuals;
@@ -435,7 +460,7 @@ describe('unfiltered article pipeline', () => {
       wechatClient: null,
       mediaPipeline: { collect },
       evidence,
-      analyze: vi.fn(async () => ({ translation: '中文翻译', digest: '一条小更新也会独立成稿。', facts: ['官方回复中确认了一项产品更新。'] })),
+      analyze,
     });
 
     try {
@@ -450,6 +475,7 @@ describe('unfiltered article pipeline', () => {
       }));
       expect(llmClient.complete.mock.calls.some(([request]) => request.system.includes('微信公众号总编辑'))).toBe(false);
       expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ tweetUrl: post.sourceUrl, postId: post.postId }));
+      expect(analyze).toHaveBeenCalledWith(expect.objectContaining({ evidencePath: undefined }));
       expect(writerVisuals.map(asset => asset.localPath)).not.toContain('unrelated.jpg');
       expect(writerVisuals.map(asset => asset.localPath)).not.toContain('missing-frame.jpg');
     } finally {

@@ -81,6 +81,16 @@ function videoPosterPath(assets) {
   return video?.metadata?.posterPath || video?.metadata?.keyframes?.find(Boolean);
 }
 
+async function capturePostEvidence({ evidence, post, assets, outputPath, thread, translation, logger }) {
+  try {
+    await evidence({ tweetUrl: post.sourceUrl, postId: post.postId, translation, mediaPosterPath: videoPosterPath(assets), outputPath, thread });
+    return true;
+  } catch (error) {
+    logger.warn?.('EarlyBird X evidence was unavailable; continuing without a screenshot', post.postId, error.message);
+    return false;
+  }
+}
+
 export function createArticlePipeline({ prisma, scraperFactory, llmClient = createMultimodalClient(), wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence, analyze = analyzePost, notifier = createHermesNotifier({ prisma }), coverImageGenerator = createCoverImageGenerator(), logger = console } = {}) {
   const writer = createArticleWriter({ client: llmClient });
   return {
@@ -113,13 +123,13 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const assets = await collectAssets({ prisma, mediaPipeline, post: job.post, thread });
         const research = { citations: [], images: [], queries: [], allowedHosts: [] };
         const allAssets = assets;
-        await evidence({ tweetUrl: job.post.sourceUrl, postId: job.post.postId, translation: '', mediaPosterPath: videoPosterPath(assets), outputPath: evidencePath, thread });
+        const hasEvidence = await capturePostEvidence({ evidence, post: job.post, assets, outputPath: evidencePath, thread, translation: '', logger });
         const analysisPost = { ...job.post.rawData, text: job.post.text, storyPosts: storyPosts.map(item => ({ author: item.authorUsername, createdAt: item.createdAt, url: item.sourceUrl, text: item.text })) };
-        const analysis = await analyze({ client: llmClient, post: analysisPost, thread, assets: allAssets, evidencePath });
+        const analysis = await analyze({ client: llmClient, post: analysisPost, thread, assets: allAssets, evidencePath: hasEvidence ? evidencePath : undefined });
         const analysisMetadata = { ...editorialMetadata, analysis, research: { citations: research.citations, queries: research.queries } };
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'analyzed', metadata: analysisMetadata } });
-        await evidence({ tweetUrl: job.post.sourceUrl, postId: job.post.postId, translation: analysis.translation, mediaPosterPath: videoPosterPath(assets), outputPath: evidencePath, thread });
-        const articleAssets = [...allAssets, postEvidenceAsset(job.post, evidencePath)];
+        if (hasEvidence) await capturePostEvidence({ evidence, post: job.post, assets, outputPath: evidencePath, thread, translation: analysis.translation, logger });
+        const articleAssets = hasEvidence ? [...allAssets, postEvidenceAsset(job.post, evidencePath)] : allAssets;
         const references = articleReferences(storyPosts, research);
         const article = await writer.write({ post: job.post, thread, analysis, editorial, storyPosts, research: { ...research, assets: allAssets.filter(asset => asset.kind === 'image').map(asset => ({ path: asset.localPath, sourceUrl: asset.sourceUrl, altText: asset.metadata?.altText || '' })) }, assets: articleAssets, sourceUrl: job.post.sourceUrl });
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'written', markdown: article.markdown } });
@@ -143,7 +153,8 @@ export function createArticlePipeline({ prisma, scraperFactory, llmClient = crea
         const coverMetadata = cover || { status: 'source-fallback', reason: 'cover image generation failed' };
         const metadataWithCover = { ...analysisMetadata, cover: coverMetadata };
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'humanized', metadata: metadataWithCover } });
-        const thumbPath = cover?.localPath || visualAssets[0]?.localPath || evidencePath;
+        const thumbPath = cover?.localPath || visualAssets[0]?.localPath;
+        if (!thumbPath) throw new Error('no generated cover, source media, or evidence screenshot is available for the WeChat thumbnail');
         const thumb = await wechatClient.uploadPermanentMaterial(thumbPath, 'thumb');
         for (const asset of visualAssets) {
           const uploaded = await wechatClient.uploadArticleImage(asset.localPath);
