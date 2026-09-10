@@ -118,8 +118,8 @@ router.get('/overview', async (_req, res) => {
       config: {
         xCookies: Boolean(process.env.X_COOKIES || process.env.TWITTER_COOKIES || process.env.EARLYBIRD_X_COOKIES_FILE),
         llm: Boolean(process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY),
-        editorialReview: Boolean(process.env.EARLYBIRD_REVIEW_LLM_API_KEY || process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY),
-        braveImageSearch: Boolean(process.env.EARLYBIRD_BRAVE_SEARCH_API_KEY),
+        editorialReview: Boolean(process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY),
+        tavilyImageSearch: Boolean(process.env.EARLYBIRD_TAVILY_API_KEY),
         coverImage: Boolean(process.env.EARLYBIRD_COVER_IMAGE_API_KEY && process.env.EARLYBIRD_COVER_IMAGE_BASE_URL),
         wechat: Boolean(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET),
         redis: Boolean(process.env.REDIS_URL || process.env.REDIS_HOST),

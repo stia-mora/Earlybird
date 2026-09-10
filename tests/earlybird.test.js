@@ -20,7 +20,7 @@ import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
 import { availableFixedEndVisuals } from '../src/earlybird/fixedEndVisuals.js';
 import { buildCoverPrompt, createCoverImageGenerator, normalizeCoverImage, WECHAT_COVER_SIZE } from '../src/earlybird/coverImage.js';
 import { createEditorialReviewer, draftQualityIssues, normalizeEditorialDecision } from '../src/earlybird/editorialReview.js';
-import { collectBraveImages, createBraveImageSearch, normalizeBraveImageResult } from '../src/earlybird/braveImageSearch.js';
+import { collectTavilyImages, createTavilyImageSearch, normalizeTavilyImageResult } from '../src/earlybird/tavilyImageSearch.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -289,25 +289,26 @@ describe('independent editorial review', () => {
   });
 });
 
-describe('Brave image sourcing', () => {
+describe('Tavily image sourcing', () => {
   it('normalizes searchable image metadata with both original and source page URLs', () => {
-    expect(normalizeBraveImageResult({ url: 'https://news.example/article', title: '发布会图片', properties: { url: 'https://cdn.example/launch.png', width: 1200, height: 800 } }, 'OpenAI launch')).toMatchObject({
-      imageUrl: 'https://cdn.example/launch.png', sourcePageUrl: 'https://news.example/article', sourceDomain: 'news.example', width: 1200,
+    expect(normalizeTavilyImageResult({ url: 'https://cdn.example/launch.png', title: '发布会图片', description: '产品发布配图' }, 'OpenAI launch', 'https://news.example/article')).toMatchObject({
+      imageUrl: 'https://cdn.example/launch.png', sourcePageUrl: 'https://news.example/article', sourceDomain: 'news.example', description: '产品发布配图',
     });
   });
 
-  it('uses the Brave endpoint and records image attribution for downloaded assets', async () => {
-    const searchFetch = vi.fn(async () => new Response(JSON.stringify({ results: [{ url: 'https://news.example/article', title: '发布会图片', properties: { url: 'https://cdn.example/launch.png' } }] }), { status: 200 }));
-    const search = createBraveImageSearch({ apiKey: 'brave-key', fetchImpl: searchFetch });
+  it('uses the Tavily endpoint and records image attribution for downloaded assets', async () => {
+    const searchFetch = vi.fn(async () => new Response(JSON.stringify({ images: [{ url: 'https://cdn.example/launch.png', title: '发布会图片', description: '产品发布配图' }] }), { status: 200 }));
+    const search = createTavilyImageSearch({ apiKey: 'tavily-key', fetchImpl: searchFetch });
     await expect(search.search('OpenAI launch')).resolves.toHaveLength(1);
-    expect(searchFetch.mock.calls[0][1].headers['x-subscription-token']).toBe('brave-key');
-    const outputDir = await mkdtemp(join(tmpdir(), 'earlybird-brave-'));
-    const assets = await collectBraveImages({
+    expect(searchFetch.mock.calls[0][1].headers.authorization).toBe('Bearer tavily-key');
+    expect(JSON.parse(searchFetch.mock.calls[0][1].body)).toMatchObject({ include_images: true, include_image_descriptions: true });
+    const outputDir = await mkdtemp(join(tmpdir(), 'earlybird-tavily-'));
+    const assets = await collectTavilyImages({
       search: { configured: true, search: async () => [{ imageUrl: 'https://cdn.example/launch.png', sourcePageUrl: 'https://news.example/article', sourceDomain: 'news.example', title: '发布会图片', query: 'OpenAI launch' }] },
-      post: { id: 'p-brave', postId: 'brave-post' }, visualPlan: [{ query: 'OpenAI launch', purpose: '说明发布', altText: '发布会图片' }], needed: 1, outputDir,
+      post: { id: 'p-tavily', postId: 'tavily-post' }, visualPlan: [{ query: 'OpenAI launch', purpose: '说明发布', altText: '发布会图片' }], needed: 1, outputDir,
       fetchImpl: async () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/png' } }),
     });
-    expect(assets[0]).toMatchObject({ kind: 'web-image', metadata: expect.objectContaining({ sourcePageUrl: 'https://news.example/article', sourceDomain: 'news.example', attribution: '图片来源：news.example' }) });
+    expect(assets[0]).toMatchObject({ kind: 'web-image', metadata: expect.objectContaining({ provider: 'tavily-search', sourcePageUrl: 'https://news.example/article', sourceDomain: 'news.example', attribution: '图片来源：news.example' }) });
   });
 });
 

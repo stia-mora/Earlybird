@@ -26,37 +26,51 @@ function compact(value, maximum = 240) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maximum);
 }
 
-export function normalizeBraveImageResult(result, query) {
-  const imageUrl = safeUrl(result?.properties?.url || result?.thumbnail?.src);
-  const sourcePageUrl = safeUrl(result?.url);
-  if (!imageUrl || !sourcePageUrl) return null;
+export function normalizeTavilyImageResult(image, query, sourcePageUrl = null) {
+  const imageUrl = safeUrl(typeof image === 'string' ? image : image?.url);
+  const sourceUrl = safeUrl(sourcePageUrl || image?.source_url || image?.sourcePageUrl || imageUrl);
+  if (!imageUrl || !sourceUrl) return null;
   return {
     imageUrl: imageUrl.toString(),
-    sourcePageUrl: sourcePageUrl.toString(),
-    sourceDomain: sourcePageUrl.hostname,
-    title: compact(result?.title),
+    sourcePageUrl: sourceUrl.toString(),
+    sourceDomain: sourceUrl.hostname,
+    title: compact(image?.title),
+    description: compact(image?.description),
     query: compact(query),
-    width: Number(result?.properties?.width || result?.thumbnail?.width || 0) || null,
-    height: Number(result?.properties?.height || result?.thumbnail?.height || 0) || null,
   };
 }
 
-export function createBraveImageSearch({ apiKey = process.env.EARLYBIRD_BRAVE_SEARCH_API_KEY, fetchImpl = globalThis.fetch, endpoint = 'https://api.search.brave.com/res/v1/images/search' } = {}) {
+export function createTavilyImageSearch({ apiKey = process.env.EARLYBIRD_TAVILY_API_KEY, fetchImpl = globalThis.fetch, endpoint = 'https://api.tavily.com/search' } = {}) {
   return {
     configured: Boolean(apiKey),
     async search(query, { count = 8 } = {}) {
       if (!apiKey) return [];
-      const url = new URL(endpoint);
-      url.search = new URLSearchParams({ q: compact(query, 400), count: String(Math.max(1, Math.min(20, count))), safesearch: 'strict', search_lang: 'en', country: 'ALL' }).toString();
-      const response = await fetchImpl(url, { headers: { accept: 'application/json', 'x-subscription-token': apiKey } });
+      const response = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          query: compact(query, 400),
+          max_results: Math.max(1, Math.min(20, count)),
+          search_depth: 'basic',
+          include_images: true,
+          include_image_descriptions: true,
+        }),
+      });
       const data = await response.json();
-      if (!response.ok) throw new Error(`Brave image search failed (${response.status}): ${compact(data?.message || data?.error, 180)}`);
-      return (data.results || []).map(result => normalizeBraveImageResult(result, query)).filter(Boolean);
+      if (!response.ok) throw new Error(`Tavily image search failed (${response.status}): ${compact(data?.detail || data?.error || data?.message, 180)}`);
+      const nested = (data.results || []).flatMap(result => (result.images || []).map(image => normalizeTavilyImageResult(image, query, result.url)));
+      const topLevel = (data.images || []).map(image => normalizeTavilyImageResult(image, query));
+      const seen = new Set();
+      return [...nested, ...topLevel].filter(Boolean).filter(image => {
+        if (seen.has(image.imageUrl)) return false;
+        seen.add(image.imageUrl);
+        return true;
+      });
     },
   };
 }
 
-export async function collectBraveImages({ search = createBraveImageSearch(), prisma, post, visualPlan = [], needed = 0, outputDir = process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', fetchImpl = globalThis.fetch, logger = console } = {}) {
+export async function collectTavilyImages({ search = createTavilyImageSearch(), prisma, post, visualPlan = [], needed = 0, outputDir = process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', fetchImpl = globalThis.fetch, logger = console } = {}) {
   if (!post || needed <= 0 || !search.configured) return [];
   await mkdir(outputDir, { recursive: true });
   const assets = [];
@@ -67,7 +81,7 @@ export async function collectBraveImages({ search = createBraveImageSearch(), pr
     try {
       results = await search.search(plan.query);
     } catch (error) {
-      logger.warn?.('EarlyBird Brave image search failed', error.message);
+      logger.warn?.('EarlyBird Tavily image search failed', error.message);
       continue;
     }
     for (const result of results) {
@@ -80,7 +94,7 @@ export async function collectBraveImages({ search = createBraveImageSearch(), pr
         const buffer = Buffer.from(await response.arrayBuffer());
         if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) continue;
         const digest = createHash('sha256').update(buffer).digest('hex');
-        const localPath = join(outputDir, `${post.postId}-brave-${digest.slice(0, 16)}${extension(new URL(result.imageUrl), contentType)}`);
+        const localPath = join(outputDir, `${post.postId}-tavily-${digest.slice(0, 16)}${extension(new URL(result.imageUrl), contentType)}`);
         await writeFile(localPath, buffer);
         const data = {
           postId: post.id,
@@ -91,25 +105,24 @@ export async function collectBraveImages({ search = createBraveImageSearch(), pr
           mimeType: contentType,
           status: 'ready',
           metadata: {
-            provider: 'brave-image-search',
+            provider: 'tavily-search',
             sourcePageUrl: result.sourcePageUrl,
             sourceDomain: result.sourceDomain,
             title: result.title,
+            description: result.description,
             query: result.query,
             purpose: compact(plan.purpose),
-            altText: compact(plan.altText || result.title || '来自网页检索的图片', 120),
+            altText: compact(plan.altText || result.description || result.title || '来自网页检索的图片', 120),
             attribution: `图片来源：${result.sourceDomain}`,
             retrievedAt: new Date().toISOString(),
-            width: result.width,
-            height: result.height,
           },
         };
         const asset = prisma?.earlyBirdAsset?.upsert
           ? await prisma.earlyBirdAsset.upsert({ where: { postId_sourceUrl: { postId: post.id, sourceUrl: result.imageUrl } }, update: data, create: data })
-          : { ...data, id: `brave-${assets.length}` };
+          : { ...data, id: `tavily-${assets.length}` };
         assets.push(asset);
       } catch (error) {
-        logger.warn?.('EarlyBird Brave image download failed', result.imageUrl, error.message);
+        logger.warn?.('EarlyBird Tavily image download failed', result.imageUrl, error.message);
       }
     }
   }

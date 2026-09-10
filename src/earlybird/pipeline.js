@@ -1,7 +1,7 @@
 import { basename, join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { assembleThread } from './threadAssembler.js';
-import { analyzePost, createEditorialReviewClient, createMultimodalClient } from './aiPipeline.js';
+import { analyzePost, createMultimodalClient } from './aiPipeline.js';
 import { humanize } from './humanizer.js';
 import { renderGzhMarkdown, validateGzhHtml } from './gzhRenderer.js';
 import { captureEvidence } from './evidenceCapture.js';
@@ -11,7 +11,7 @@ import { createWeChatClient } from './wechatClient.js';
 import { createHermesNotifier } from './hermesNotifier.js';
 import { availableFixedEndVisuals } from './fixedEndVisuals.js';
 import { createCoverImageGenerator } from './coverImage.js';
-import { collectBraveImages, createBraveImageSearch } from './braveImageSearch.js';
+import { collectTavilyImages, createTavilyImageSearch } from './tavilyImageSearch.js';
 import { contentStandard, createEditorialReviewer, reviewInputHash } from './editorialReview.js';
 
 const MAX_REWRITE_ATTEMPTS = 3;
@@ -167,10 +167,10 @@ export function createArticlePipeline({
   prisma, scraperFactory, llmClient = createMultimodalClient(), reviewClient, reviewer,
   wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence,
   analyze = analyzePost, notifier = createHermesNotifier({ prisma }), coverImageGenerator = createCoverImageGenerator(),
-  imageSearch = createBraveImageSearch(), collectWebImages = collectBraveImages, logger = console, now = () => new Date(),
+  imageSearch = createTavilyImageSearch(), collectWebImages = collectTavilyImages, logger = console, now = () => new Date(),
 } = {}) {
   const writer = createArticleWriter({ client: llmClient });
-  const editorialReviewer = reviewer || createEditorialReviewer({ client: reviewClient || (process.env.EARLYBIRD_REVIEW_LLM_API_KEY ? createEditorialReviewClient() : llmClient) });
+  const editorialReviewer = reviewer || createEditorialReviewer({ client: reviewClient || llmClient });
 
   async function manualReview(job, metadata, reason) {
     const updated = await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'manual_review', error: reason, metadata } });

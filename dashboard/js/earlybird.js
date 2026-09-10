@@ -19,7 +19,7 @@
     ['failed', '失败', 'red'],
     ['ignored', '已忽略', 'muted'],
   ];
-  const readiness = [['xCookies', 'X Cookie', '允许采集器读取来源'], ['llm', '多模态模型', '翻译、摘要和公众号写作'], ['editorialReview', '审核模型', '独立总编辑与稿件质量审核'], ['braveImageSearch', 'Brave 图片检索', '从全网补充并记录正文图片出处'], ['coverImage', '封面图服务', '生成 900×383 公众号专属封面'], ['wechat', '微信公众号', '创建和回读草稿'], ['redis', 'Redis 队列', '调度采集与文章任务'], ['mediaDir', '媒体目录', '保存证据和视频素材']];
+  const readiness = [['xCookies', 'X Cookie', '允许采集器读取来源'], ['llm', '多模态模型', '翻译、摘要和公众号写作'], ['editorialReview', '审核模型', '复用写作模型执行独立总编辑与质量审核'], ['tavilyImageSearch', 'Tavily 图片检索', '从全网补充并记录正文图片出处'], ['coverImage', '封面图服务', '生成 900×383 公众号专属封面'], ['wechat', '微信公众号', '创建和回读草稿'], ['redis', 'Redis 队列', '调度采集与文章任务'], ['mediaDir', '媒体目录', '保存证据和视频素材']];
   let timer;
 
   const $ = id => document.getElementById(id);
