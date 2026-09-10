@@ -96,7 +96,11 @@ function normalizedTitle(value) {
   return plainText(value).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
 }
 
-export async function renderGzhMarkdown(markdown, { title, digest, contentType, references = [], endVisuals = [] } = {}) {
+function imageAttribution(src, imageAttributions) {
+  return (imageAttributions || []).find(item => item?.src === src) || null;
+}
+
+export async function renderGzhMarkdown(markdown, { title, digest, contentType, references = [], endVisuals = [], imageAttributions = [] } = {}) {
   await loadGzhSources();
   const lines = sanitizeEditorialMarkdown(markdown, { preserveParagraphs: true }).split('\n');
   const safeTitle = sanitizeEditorialMarkdown(title).replace(/\s*\n\s*/g, ' ');
@@ -139,6 +143,11 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
       const image = item.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       if (image) {
         html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(sanitizeEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' '))}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
+        const attribution = imageAttribution(image[2], imageAttributions);
+        if (attribution?.sourceUrl) {
+          const label = plainText(attribution.label || attribution.sourceDomain || '图片来源');
+          html += `<p style="font-size:12px;color:#A1A1AA;line-height:1.6;margin:-12px 0 20px;"><span leaf="">${escapeHtml(label)}：${escapeHtml(attribution.sourceUrl)}</span></p>`;
+        }
         continue;
       }
       if (/^[-*]\s+/.test(item)) {

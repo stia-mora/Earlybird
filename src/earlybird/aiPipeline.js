@@ -47,6 +47,18 @@ export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_
   };
 }
 
+export function createEditorialReviewClient(options = {}) {
+  return createMultimodalClient({
+    apiKey: process.env.EARLYBIRD_REVIEW_LLM_API_KEY || process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY,
+    baseUrl: process.env.EARLYBIRD_REVIEW_LLM_BASE_URL || process.env.EARLYBIRD_LLM_BASE_URL || 'https://api.openai.com/v1',
+    model: process.env.EARLYBIRD_REVIEW_LLM_MODEL || process.env.EARLYBIRD_LLM_MODEL || 'gpt-4o-mini',
+    fallbackApiKey: process.env.EARLYBIRD_REVIEW_LLM_FALLBACK_API_KEY || process.env.EARLYBIRD_LLM_FALLBACK_API_KEY,
+    fallbackBaseUrl: process.env.EARLYBIRD_REVIEW_LLM_FALLBACK_BASE_URL || process.env.EARLYBIRD_LLM_FALLBACK_BASE_URL,
+    fallbackModel: process.env.EARLYBIRD_REVIEW_LLM_FALLBACK_MODEL || process.env.EARLYBIRD_LLM_FALLBACK_MODEL || process.env.EARLYBIRD_REVIEW_LLM_MODEL || process.env.EARLYBIRD_LLM_MODEL || 'gpt-4o-mini',
+    ...options,
+  });
+}
+
 async function existingImages(images) {
   const available = await Promise.all(images.map(async image => {
     if (image?.data) return image;

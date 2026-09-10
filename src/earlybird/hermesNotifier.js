@@ -74,6 +74,16 @@ export function createHermesNotifier({
         payload: { jobId: job.id, postId: post?.postId, source: handle, mediaId: draft?.mediaId, manualVideoFiles: videos },
       });
     },
+    manualReview({ job, reason }) {
+      const title = job?.metadata?.article?.title || job?.metadata?.cover?.title || 'EarlyBird 稿件';
+      return deliver({
+        kind: 'manual_review',
+        dedupeKey: `manual-review:${job.id}:${job.metadata?.review?.at || job.updatedAt || ''}`,
+        subject: 'EarlyBird：稿件需要人工审核',
+        message: `任务：${job.id}\n标题：${title}\n原因：${compact(reason, 800)}`,
+        payload: { jobId: job.id, reason: compact(reason, 800), review: job?.metadata?.review || null },
+      });
+    },
     dailySummary(summary) {
       return deliver({
         kind: 'daily_summary',

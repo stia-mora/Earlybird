@@ -76,9 +76,26 @@ async function sendDailySummary() {
   return delivery;
 }
 
+async function runDailyEditorialReview() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(now).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  const start = new Date(`${parts.year}-${parts.month}-${parts.day}T00:00:00+08:00`);
+  const jobs = await prisma.earlyBirdArticleJob.findMany({
+    where: { status: { in: ['detected', 'verified'] }, detectedAt: { gte: start, lte: now } },
+    select: { id: true },
+    orderBy: { detectedAt: 'asc' },
+  });
+  for (const job of jobs) {
+    await pipeline.process(job.id, { force: true, dailyReview: true });
+  }
+  console.log(`EarlyBird daily editorial review processed ${jobs.length} job(s)`);
+  return jobs.length;
+}
+
 await monitor.ensureDefaults();
 queue.process('process', Number(process.env.EARLYBIRD_CONCURRENCY || 1), async job => {
-  return pipeline.process(job.data.jobId);
+  return pipeline.process(job.data.jobId, job.data.options || {});
 });
 monitorQueue.process('poll', Number(process.env.EARLYBIRD_SOURCE_CONCURRENCY || 2), async job => {
   await waitForSourceRequestSlot();
@@ -113,6 +130,9 @@ if (legacyEditorialJobs) console.warn(`EarlyBird requeued ${legacyEditorialJobs}
 const dailySummaryTask = cron.schedule(process.env.EARLYBIRD_DAILY_SUMMARY_CRON || '0 21 * * *', () => {
   sendDailySummary().catch(error => console.error('EarlyBird daily summary failed', error.message));
 }, { timezone: 'Asia/Shanghai', noOverlap: true });
+const editorialReviewTask = cron.schedule(process.env.EARLYBIRD_DAILY_EDITORIAL_REVIEW_CRON || '0 9,17 * * *', () => {
+  runDailyEditorialReview().catch(error => console.error('EarlyBird daily editorial review failed', error.message));
+}, { timezone: 'Asia/Shanghai', noOverlap: true });
 console.log(`EarlyBird worker ready (${await prisma.earlyBirdSource.count()} sources)`);
 
-process.on('SIGTERM', async () => { dailySummaryTask.stop(); await queue.close(); await monitorQueue.close(); await prisma.$disconnect(); process.exit(0); });
+process.on('SIGTERM', async () => { dailySummaryTask.stop(); editorialReviewTask.stop(); await queue.close(); await monitorQueue.close(); await prisma.$disconnect(); process.exit(0); });

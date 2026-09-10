@@ -15,7 +15,7 @@ function getArticleQueue() {
   return articleQueue;
 }
 
-async function enqueueArticleProcess(jobId) {
+async function enqueueArticleProcess(jobId, options = {}) {
   const queue = getArticleQueue();
   const queueJobId = `earlybird-article-${jobId}`;
   const existing = await queue.getJob(queueJobId);
@@ -28,7 +28,7 @@ async function enqueueArticleProcess(jobId) {
     if (['active', 'waiting', 'delayed', 'paused'].includes(state)) return;
     await existing.remove();
   }
-  await queue.add('process', { jobId }, { jobId: queueJobId, removeOnComplete: 100, removeOnFail: 100 });
+  await queue.add('process', { jobId, options }, { jobId: queueJobId, removeOnComplete: 100, removeOnFail: 100 });
 }
 function startOfToday() {
   const shanghaiOffsetMs = 8 * 60 * 60 * 1000;
@@ -46,10 +46,16 @@ function serviceStatus(lastPolledAt, pollIntervalSeconds) {
 }
 
 function dashboardJobNote(job) {
+  if (job.status === 'editorial_review') return '独立总编辑正在判断文章类型、关联内容和配图计划。';
+  if (job.status === 'writing' || job.status === 'revising') return '稿件正按审核意见写作或定向重写。';
+  if (job.status === 'quality_review') return '独立审校正在检查事实、故事线、自然度和图文对应关系。';
   if (job.status === 'ignored') return '旧版筛选留下的历史任务，重新处理后会直接进入写作。';
-  if (job.status === 'merged') return '旧版事件合并留下的历史任务，可单独重新处理。';
+  if (job.status === 'merged') return job.metadata?.mergeTargetJobId ? `已并入主稿任务 ${job.metadata.mergeTargetJobId}。` : '旧版事件合并留下的历史任务，可单独重新处理。';
   if (job.status === 'held') return '旧版等待合并留下的历史任务，可直接重新处理。';
-  if (job.status === 'manual_review') return '自动审稿未通过，需要人工复核。';
+  if (job.status === 'manual_review') {
+    const issues = job.editorialReviews?.[0]?.issues || job.metadata?.review?.issues || [];
+    return issues.length ? `自动审稿未通过：${issues.slice(0, 2).join('；')}` : `自动审稿未通过：${job.error || '需要人工复核。'}`;
+  }
   if (job.status === 'failed') return '流水线未完成，请登录后在任务详情中查看原因或重试。';
   if (job.status === 'verified') return '已创建并通过微信草稿回读校验。';
   return '正在推进到下一个写作或排版阶段。';
@@ -58,16 +64,17 @@ function dashboardJobNote(job) {
 router.get('/overview', async (_req, res) => {
   try {
     const today = startOfToday();
-    const [sources, postsToday, jobsToday, jobs, polls, notifications, jobGroups, drafts, verifiedDrafts] = await Promise.all([
+    const [sources, postsToday, jobsToday, jobs, polls, notifications, jobGroups, drafts, verifiedDrafts, manualReview] = await Promise.all([
       prisma.earlyBirdSource.findMany({ orderBy: { handle: 'asc' }, select: { id: true, handle: true, displayName: true, enabled: true, baselineComplete: true, pollIntervalSeconds: true, lastPolledAt: true, updatedAt: true } }),
       prisma.earlyBirdPost.count({ where: { capturedAt: { gte: today } } }),
       prisma.earlyBirdArticleJob.count({ where: { detectedAt: { gte: today } } }),
-      prisma.earlyBirdArticleJob.findMany({ take: 30, orderBy: { updatedAt: 'desc' }, select: { id: true, status: true, updatedAt: true, source: { select: { handle: true, displayName: true } }, post: { select: { postId: true } }, draft: { select: { verified: true } } } }),
+      prisma.earlyBirdArticleJob.findMany({ take: 30, orderBy: { updatedAt: 'desc' }, select: { id: true, status: true, updatedAt: true, metadata: true, source: { select: { handle: true, displayName: true } }, post: { select: { postId: true } }, draft: { select: { verified: true } }, editorialReviews: { take: 1, orderBy: { createdAt: 'desc' }, select: { decision: true, qualityScore: true, issues: true, relatedJobIds: true, createdAt: true } } } }),
       prisma.earlyBirdPoll.findMany({ take: 20, orderBy: { polledAt: 'desc' }, select: { id: true, outcome: true, detectedCount: true, polledAt: true, source: { select: { handle: true, displayName: true } } } }),
       prisma.earlyBirdNotification.findMany({ take: 20, orderBy: { createdAt: 'desc' }, select: { kind: true, status: true, createdAt: true } }),
       prisma.earlyBirdArticleJob.groupBy({ by: ['status'], _count: { _all: true } }),
       prisma.earlyBirdDraft.count(),
       prisma.earlyBirdDraft.count({ where: { verified: true } }),
+      prisma.earlyBirdArticleJob.count({ where: { status: 'manual_review' } }),
     ]);
 
     const enabledSources = sources.filter(source => source.enabled);
@@ -93,10 +100,10 @@ router.get('/overview', async (_req, res) => {
 
     const counts = Object.fromEntries(jobGroups.map(group => [group.status, group._count._all]));
     const attention = jobs
-      .filter(job => ['failed', 'manual_review', 'held', 'detected', 'classified', 'captured', 'analyzed', 'written', 'humanized', 'rendered', 'draft_created', 'ignored'].includes(job.status))
+      .filter(job => ['failed', 'manual_review', 'detected', 'editorial_review', 'writing', 'revising', 'quality_review', 'analyzed', 'written', 'rendered', 'ignored'].includes(job.status))
       .slice(0, 8)
       .map(job => ({ id: job.id, status: job.status, reason: dashboardJobNote(job), source: job.source?.displayName || job.source?.handle || '未知来源', postId: job.post?.postId || '', updatedAt: job.updatedAt }));
-    const safeJobs = jobs.map(job => ({ ...job, note: dashboardJobNote(job) }));
+    const safeJobs = jobs.map(job => ({ ...job, note: dashboardJobNote(job), review: job.editorialReviews?.[0] || job.metadata?.review || null }));
     const safePolls = polls.map(poll => ({
       id: poll.id,
       outcome: poll.outcome,
@@ -111,12 +118,14 @@ router.get('/overview', async (_req, res) => {
       config: {
         xCookies: Boolean(process.env.X_COOKIES || process.env.TWITTER_COOKIES || process.env.EARLYBIRD_X_COOKIES_FILE),
         llm: Boolean(process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY),
+        editorialReview: Boolean(process.env.EARLYBIRD_REVIEW_LLM_API_KEY || process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY),
+        braveImageSearch: Boolean(process.env.EARLYBIRD_BRAVE_SEARCH_API_KEY),
         coverImage: Boolean(process.env.EARLYBIRD_COVER_IMAGE_API_KEY && process.env.EARLYBIRD_COVER_IMAGE_BASE_URL),
         wechat: Boolean(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET),
         redis: Boolean(process.env.REDIS_URL || process.env.REDIS_HOST),
         mediaDir: existsSync(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media'),
       },
-      metrics: { sources: sources.length, enabledSources: enabledSources.length, postsToday, jobsToday, drafts, verifiedDrafts },
+      metrics: { sources: sources.length, enabledSources: enabledSources.length, postsToday, jobsToday, drafts, verifiedDrafts, manualReview },
       pipeline: counts,
       sources: sourceStates,
       jobs: safeJobs,
@@ -167,9 +176,9 @@ router.get('/polls', async (req, res) => {
   res.json(await prisma.earlyBirdPoll.findMany({ where, include: { source: true }, orderBy: { polledAt: 'desc' }, take: Math.min(200, Number(req.query.limit || 50)) }));
 });
 router.get('/notifications', async (req, res) => res.json(await prisma.earlyBirdNotification.findMany({ orderBy: { createdAt: 'desc' }, take: Math.min(100, Number(req.query.limit || 50)) })));
-router.get('/jobs', async (req, res) => res.json(await prisma.earlyBirdArticleJob.findMany({ where: req.query.status ? { status: String(req.query.status) } : undefined, include: { source: true, post: true, draft: true }, orderBy: { updatedAt: 'desc' }, take: Math.min(100, Number(req.query.limit || 50)) })));
+router.get('/jobs', async (req, res) => res.json(await prisma.earlyBirdArticleJob.findMany({ where: req.query.status ? { status: String(req.query.status) } : undefined, include: { source: true, post: true, draft: true, editorialReviews: { orderBy: { createdAt: 'desc' }, take: 5 }, draftReplacements: { orderBy: { createdAt: 'desc' }, take: 5 } }, orderBy: { updatedAt: 'desc' }, take: Math.min(100, Number(req.query.limit || 50)) })));
 router.get('/jobs/:id', async (req, res) => {
-  const job = await prisma.earlyBirdArticleJob.findUnique({ where: { id: req.params.id }, include: { source: true, post: { include: { assets: true } }, draft: true } });
+  const job = await prisma.earlyBirdArticleJob.findUnique({ where: { id: req.params.id }, include: { source: true, post: { include: { assets: true } }, draft: true, editorialReviews: { orderBy: { createdAt: 'desc' } }, draftReplacements: { orderBy: { createdAt: 'desc' } } } });
   if (!job) return res.status(404).json({ error: 'job not found' });
   res.json(job);
 });
@@ -183,6 +192,12 @@ router.post('/jobs/:id/retry', async (req, res) => {
   const job = await prisma.earlyBirdArticleJob.update({ where: { id: req.params.id }, data: { status: 'detected', error: null } });
   await enqueueArticleProcess(job.id);
   res.status(202).json({ id: job.id, status: job.status, queued: true });
+});
+router.post('/jobs/:id/review', async (req, res) => {
+  const job = await prisma.earlyBirdArticleJob.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  if (!job) return res.status(404).json({ error: 'job not found' });
+  await enqueueArticleProcess(job.id, { force: true, dailyReview: true });
+  res.status(202).json({ id: job.id, queued: true, mode: 'editorial_review' });
 });
 router.post('/jobs/:id/create-draft', async (req, res) => {
   try {

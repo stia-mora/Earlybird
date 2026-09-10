@@ -9,6 +9,11 @@ const ARTICLE_QUEUE_OPTIONS = {
   removeOnFail: 100,
 };
 
+export function editorialBatchDelay(now = Date.now(), intervalMs = Number(process.env.EARLYBIRD_EDITORIAL_BATCH_MINUTES || 30) * 60 * 1000) {
+  const interval = Math.max(60_000, intervalMs);
+  return Math.max(0, Math.ceil(now / interval) * interval - now);
+}
+
 function withTimeout(promise, timeoutMs) {
   let timer;
   return Promise.race([
@@ -117,7 +122,11 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
             create: { sourceId: source.id, postId: String(post.id), rootPostId: String(post.id), sourceUrl: `https://x.com/${source.handle}/status/${post.id}`, authorUsername: post.author?.username || source.handle, text: post.text || '', createdAt: post.createdAt ? new Date(post.createdAt) : null, rawData: post, mediaData: post.media || [] },
           });
           const job = await prisma.earlyBirdArticleJob.upsert({ where: { postId: record.id }, update: {}, create: { sourceId: source.id, postId: record.id, status: 'detected' } });
-          if (queue) await queue.add('process', { jobId: job.id }, { jobId: `earlybird-article-${job.id}`, ...ARTICLE_QUEUE_OPTIONS });
+          if (queue) await queue.add('process', { jobId: job.id }, {
+            jobId: `earlybird-article-${job.id}`,
+            delay: editorialBatchDelay(),
+            ...ARTICLE_QUEUE_OPTIONS,
+          });
           detected += 1;
           postIds.push(String(post.id));
         }

@@ -310,6 +310,8 @@ model EarlyBirdArticleJob {
   source         EarlyBirdSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   post           EarlyBirdPost   @relation(fields: [postId], references: [id], onDelete: Cascade)
   draft          EarlyBirdDraft?
+  editorialReviews EarlyBirdEditorialReview[]
+  draftReplacements EarlyBirdDraftReplacement[]
 
   @@index([status, updatedAt])
 }
@@ -322,9 +324,48 @@ model EarlyBirdDraft {
   verification   Json?
   verified       Boolean             @default(false)
   failureReason  String?
+  deletedAt      DateTime?
+  deleteError    String?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   job            EarlyBirdArticleJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model EarlyBirdEditorialReview {
+  id                  String              @id @default(cuid())
+  jobId               String
+  phase               String
+  attempt             Int                 @default(1)
+  decision            String
+  contentType         String?
+  qualityScore        Int?
+  issues              Json?
+  rewriteInstructions String?
+  visualPlan          Json?
+  relatedJobIds       Json?
+  inputHash           String
+  output              Json
+  createdAt           DateTime            @default(now())
+  job                 EarlyBirdArticleJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
+  @@index([decision, createdAt])
+}
+
+model EarlyBirdDraftReplacement {
+  id         String              @id @default(cuid())
+  jobId      String
+  oldMediaId String?
+  newMediaId String
+  status     String              @default("pending")
+  error      String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  job        EarlyBirdArticleJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
+  @@index([newMediaId])
+  @@index([status, updatedAt])
 }
 
 model EarlyBirdNotification {

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cacheScraperFactory, configuredXCookies, createSourceMonitor, mergeCookieHeaders, retryAtFromRateLimit } from '../src/earlybird/sourceMonitor.js';
+import { cacheScraperFactory, configuredXCookies, createSourceMonitor, editorialBatchDelay, mergeCookieHeaders, retryAtFromRateLimit } from '../src/earlybird/sourceMonitor.js';
 import { startupPollDelay } from '../src/earlybird/sourcePollTiming.js';
 import { analyzePost, createMultimodalClient } from '../src/earlybird/aiPipeline.js';
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
@@ -12,13 +12,15 @@ import { assertGzhTypography, renderGzhMarkdown, validateGzhHtml } from '../src/
 import { createWeChatClient } from '../src/earlybird/wechatClient.js';
 import { comparePosts, DEFAULT_SOURCES, fullWidthPunctuation } from '../src/earlybird/utils.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
-import { createArticlePipeline } from '../src/earlybird/pipeline.js';
+import { createArticlePipeline, replaceManagedDrafts } from '../src/earlybird/pipeline.js';
 import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH, sanitizeEditorialMarkdown, varyEditorialParagraphs } from '../src/earlybird/articleWriter.js';
 import { enqueueInterruptedJobs, enqueueLegacyEditorialJobs } from '../src/earlybird/jobRecovery.js';
 import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
 import { availableFixedEndVisuals } from '../src/earlybird/fixedEndVisuals.js';
 import { buildCoverPrompt, createCoverImageGenerator, normalizeCoverImage, WECHAT_COVER_SIZE } from '../src/earlybird/coverImage.js';
+import { createEditorialReviewer, draftQualityIssues, normalizeEditorialDecision } from '../src/earlybird/editorialReview.js';
+import { collectBraveImages, createBraveImageSearch, normalizeBraveImageResult } from '../src/earlybird/braveImageSearch.js';
 
 function prismaFixture() {
   const sources = [{ id: 's1', handle: 'openai', enabled: true, baselineComplete: false, lastSeenCreatedAt: null, lastSeenPostId: null }];
@@ -144,6 +146,11 @@ describe('EarlyBird source monitor', () => {
       backoff: { type: 'exponential', delay: 30000 },
     }));
   });
+
+  it('holds each new post until the next editorial batch boundary', () => {
+    expect(editorialBatchDelay(1_800_000, 1_800_000)).toBe(0);
+    expect(editorialBatchDelay(1_800_001, 1_800_000)).toBe(1_799_999);
+  });
 });
 
 describe('EarlyBird Hermes notifications', () => {
@@ -251,6 +258,78 @@ describe('EarlyBird job recovery', () => {
   });
 });
 
+describe('independent editorial review', () => {
+  const job = { id: 'j-current', post: { postId: '101', authorUsername: 'openai', sourceUrl: 'https://x.com/openai/status/101', text: 'OpenAI 发布了一项新的代理能力。' }, source: { handle: 'openai' }, metadata: {} };
+  const candidate = { id: 'j-related', post: { postId: '102', authorUsername: 'openai', sourceUrl: 'https://x.com/openai/status/102', text: '同一代理能力补充了开放范围。' }, source: { handle: 'openai' }, metadata: {} };
+
+  it('rejects a merge that does not identify a real candidate task', () => {
+    const decision = normalizeEditorialDecision({ decision: 'merge', contentType: 'event', relatedJobIds: ['missing'] }, { job, candidates: [candidate] });
+    expect(decision.decision).toBe('rewrite');
+    expect(decision.contentType).toBe('explainer');
+    expect(decision.issues).toContain('合稿决定未给出可关联的候选内容');
+  });
+
+  it('keeps editor and draft review decisions separate', async () => {
+    const client = { complete: vi.fn()
+      .mockResolvedValueOnce({ decision: 'merge', contentType: 'event', qualityScore: 91, relatedJobIds: ['j-related'], visualPlan: [] })
+      .mockResolvedValueOnce({ decision: 'pass', contentType: 'brief', qualityScore: 94, issues: [], visualPlan: [] }) };
+    const reviewer = createEditorialReviewer({ client });
+    const triage = await reviewer.triage({ job, candidates: [candidate] });
+    expect(triage).toMatchObject({ decision: 'merge', contentType: 'event', relatedJobIds: ['j-related'] });
+    const text = Array.from({ length: 4 }, () => '官方说明明确了产品范围、开发者接入方式和需要继续观察的开放节奏。'.repeat(3)).join('\n\n');
+    const draft = await reviewer.reviewDraft({ job, article: { markdown: `![图](image.jpg)\n\n${text}` }, editorial: { contentType: 'brief' }, storyPosts: [job], assets: [{ kind: 'image', localPath: 'image.jpg' }], references: ['https://x.com/openai/status/101'] });
+    expect(draft).toMatchObject({ decision: 'pass', qualityScore: 94 });
+    expect(client.complete.mock.calls[0][0].system).toContain('总编辑');
+    expect(client.complete.mock.calls[1][0].system).toContain('独立于写作 Agent');
+  });
+
+  it('flags a draft with insufficient body, images, or sources before model approval', () => {
+    const issues = draftQualityIssues({ markdown: '很短的说明。', contentType: 'explainer', assets: [], references: [] });
+    expect(issues).toEqual(expect.arrayContaining(['正文不足 1200 个中文字符', '需要至少 3 张可用正文图片', '缺少可核查的来源链接']));
+  });
+});
+
+describe('Brave image sourcing', () => {
+  it('normalizes searchable image metadata with both original and source page URLs', () => {
+    expect(normalizeBraveImageResult({ url: 'https://news.example/article', title: '发布会图片', properties: { url: 'https://cdn.example/launch.png', width: 1200, height: 800 } }, 'OpenAI launch')).toMatchObject({
+      imageUrl: 'https://cdn.example/launch.png', sourcePageUrl: 'https://news.example/article', sourceDomain: 'news.example', width: 1200,
+    });
+  });
+
+  it('uses the Brave endpoint and records image attribution for downloaded assets', async () => {
+    const searchFetch = vi.fn(async () => new Response(JSON.stringify({ results: [{ url: 'https://news.example/article', title: '发布会图片', properties: { url: 'https://cdn.example/launch.png' } }] }), { status: 200 }));
+    const search = createBraveImageSearch({ apiKey: 'brave-key', fetchImpl: searchFetch });
+    await expect(search.search('OpenAI launch')).resolves.toHaveLength(1);
+    expect(searchFetch.mock.calls[0][1].headers['x-subscription-token']).toBe('brave-key');
+    const outputDir = await mkdtemp(join(tmpdir(), 'earlybird-brave-'));
+    const assets = await collectBraveImages({
+      search: { configured: true, search: async () => [{ imageUrl: 'https://cdn.example/launch.png', sourcePageUrl: 'https://news.example/article', sourceDomain: 'news.example', title: '发布会图片', query: 'OpenAI launch' }] },
+      post: { id: 'p-brave', postId: 'brave-post' }, visualPlan: [{ query: 'OpenAI launch', purpose: '说明发布', altText: '发布会图片' }], needed: 1, outputDir,
+      fetchImpl: async () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/png' } }),
+    });
+    expect(assets[0]).toMatchObject({ kind: 'web-image', metadata: expect.objectContaining({ sourcePageUrl: 'https://news.example/article', sourceDomain: 'news.example', attribution: '图片来源：news.example' }) });
+  });
+});
+
+describe('managed WeChat draft replacement', () => {
+  it('keeps both draft identifiers auditable when old-draft deletion fails', async () => {
+    const replacements = { create: vi.fn(async () => ({ id: 'replacement-1' })), update: vi.fn(async () => ({})) };
+    const drafts = { update: vi.fn(async () => ({})), upsert: vi.fn(async () => ({})) };
+    const result = await replaceManagedDrafts({
+      prisma: { earlyBirdDraftReplacement: replacements, earlyBirdDraft: drafts },
+      wechatClient: { deleteDraft: vi.fn(async () => { throw new Error('wechat unavailable'); }) },
+      primaryJob: { id: 'j-primary' },
+      storyJobs: [{ id: 'j-primary', draft: { id: 'd-old', mediaId: 'old-media', deletedAt: null } }],
+      draft: { media_id: 'new-media' }, verified: { media_id: 'new-media' }, requestSummary: { title: '新稿' },
+    });
+    expect(result.failure).toContain('old-media');
+    expect(replacements.create).toHaveBeenCalledWith({ data: expect.objectContaining({ oldMediaId: 'old-media', newMediaId: 'new-media' }) });
+    expect(replacements.update).toHaveBeenCalledWith({ where: { id: 'replacement-1' }, data: expect.objectContaining({ status: 'delete_failed' }) });
+    expect(drafts.update).toHaveBeenCalledWith({ where: { id: 'd-old' }, data: expect.objectContaining({ deleteError: 'wechat unavailable' }) });
+    expect(drafts.upsert).not.toHaveBeenCalled();
+  });
+});
+
 describe('thread assembly and humanizer', () => {
   it('sorts a complete thread chronologically', async () => {
     const tweets = await assembleThread({ scraper: { scrapeFullThread: async () => [{ id: '2', createdAt: '2026-01-01T00:01:00Z' }, { id: '1', createdAt: '2026-01-01T00:00:00Z' }] }, post: { postId: '1' }, waitMs: 0 });
@@ -288,20 +367,20 @@ describe('thread assembly and humanizer', () => {
     expect(visuals).toEqual([expect.objectContaining({ localPath: 'post-evidence.png', kind: 'x-post-evidence' })]);
   });
   it('reports missing long-form requirements and lets a final revision satisfy them', async () => {
-    const evidence = 'post-evidence.png';
-    const paragraphs = Array.from({ length: 30 }, () => 'OpenAI 的公开说明把事件披露、代理外部行动和后续治理放在同一条可核查的事实链中。').join('\n\n');
+    const evidence = ['post-evidence-1.png', 'post-evidence-2.png', 'post-evidence-3.png'];
+    const paragraphs = Array.from({ length: 25 }, (_, index) => `第 ${index + 1} 项公开说明将事件披露、代理外部行动和后续治理放入一条可核查的事实链，也明确了读者需要继续观察的具体边界。`).join('\n\n');
     const complete = vi.fn()
       .mockResolvedValueOnce({ title: '短稿', digest: '摘要', markdown: '这是一段不完整的短稿。' })
       .mockResolvedValueOnce({ title: '仍然过短', digest: '摘要', markdown: '这是一段不完整的短稿。' })
-      .mockResolvedValueOnce({ title: '完整稿', digest: '摘要', markdown: `开篇事实说明事件正在改变公开披露的边界。\n\n![原帖截图](${evidence})\n\n${paragraphs}\n\n## 披露口径正在变化\n\n${paragraphs}\n\n## 代理行动的边界\n\n${paragraphs}\n\n## 接下来观察什么\n\n${paragraphs}` });
+      .mockResolvedValueOnce({ title: '完整稿', digest: '摘要', markdown: `开篇事实说明事件正在改变公开披露的边界。\n\n![原帖截图](${evidence[0]})\n\n## 披露口径正在变化\n\n${paragraphs.slice(0, 420)}\n\n![产品说明](${evidence[1]})\n\n## 代理行动的边界\n\n${paragraphs.slice(420, 850)}\n\n![治理材料](${evidence[2]})\n\n## 接下来观察什么\n\n${paragraphs.slice(850)}` });
     const writer = createArticleWriter({ client: { complete } });
     const article = await writer.write({
       post: { text: '官方说明', sourceUrl: 'https://x.com/openai/status/1' },
       analysis: { facts: [] }, editorial: { contentType: 'explainer' },
-      assets: [{ kind: 'x-post-evidence', localPath: evidence, sourceUrl: 'https://x.com/openai/status/1' }],
+      assets: evidence.map(localPath => ({ kind: 'x-post-evidence', localPath, sourceUrl: 'https://x.com/openai/status/1' })),
     });
     expect(complete).toHaveBeenCalledTimes(3);
-    expect(editorialStructureIssues(article.markdown, 'explainer', articleVisualAssets([{ kind: 'x-post-evidence', localPath: evidence }]))).toEqual([]);
+    expect(editorialStructureIssues(article.markdown, 'explainer', articleVisualAssets(evidence.map(localPath => ({ kind: 'x-post-evidence', localPath }))))).toEqual([]);
   });
   it('removes Markdown emphasis and breaks article paragraphs into readable lengths', () => {
     const markdown = `- **启动阶段（Day 0）**：__系统先从零开始建立形式化陈述网络__，并逐步验证每一个可以复核的推理节点。${'系统先从零开始建立形式化陈述网络，并逐步验证每一个可以复核的推理节点。'.repeat(5)}`;
@@ -420,8 +499,8 @@ describe('controlled evidence', () => {
   });
 });
 
-describe('unfiltered article pipeline', () => {
-  it('writes every new post independently, including one previously ignored by editorial rules', async () => {
+describe('editorial article pipeline', () => {
+  it('routes an underspecified single post to manual review instead of creating a weak draft', async () => {
     const originalThreadWait = process.env.EARLYBIRD_THREAD_WAIT_MS;
     process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
     const post = { id: 'p1', postId: '1', authorUsername: 'openai', sourceUrl: 'https://x.com/openai/status/1', text: 'A reply with a small product update.', rawData: { id: '1', text: 'A reply with a small product update.', inReplyTo: { id: '0' } }, createdAt: new Date('2026-09-05T00:00:00Z') };
@@ -466,18 +545,72 @@ describe('unfiltered article pipeline', () => {
     try {
       const result = await pipeline.process(job.id);
 
-      expect(result.status).toBe('rendered');
+      expect(result.status).toBe('manual_review');
       expect(collect).toHaveBeenCalledWith(expect.objectContaining({ post }));
       expect(prisma.earlyBirdAsset.findMany).toHaveBeenCalledWith({ where: { postId: post.id, localPath: { not: null } } });
       expect(updates).toContainEqual(expect.objectContaining({
-        status: 'captured',
-        metadata: expect.objectContaining({ editorial: expect.objectContaining({ publish: true, contentType: 'brief', relatedPostIds: [] }) }),
+        status: 'editorial_review',
       }));
-      expect(llmClient.complete.mock.calls.some(([request]) => request.system.includes('微信公众号总编辑'))).toBe(false);
       expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ tweetUrl: post.sourceUrl, postId: post.postId }));
       expect(analyze).toHaveBeenCalledWith(expect.objectContaining({ evidencePath: undefined }));
       expect(writerVisuals.map(asset => asset.localPath)).not.toContain('unrelated.jpg');
       expect(writerVisuals.map(asset => asset.localPath)).not.toContain('missing-frame.jpg');
+    } finally {
+      if (originalThreadWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
+      else process.env.EARLYBIRD_THREAD_WAIT_MS = originalThreadWait;
+    }
+  });
+
+  it('re-enters writing as an event story when independent review finds a related task', async () => {
+    const originalThreadWait = process.env.EARLYBIRD_THREAD_WAIT_MS;
+    process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
+    const mediaDir = await mkdtemp(join(tmpdir(), 'earlybird-event-'));
+    const imagePaths = await Promise.all([1, 2, 3].map(async index => {
+      const path = join(mediaDir, `event-${index}.png`);
+      await writeFile(path, `image-${index}`);
+      return path;
+    }));
+    const primaryPost = { id: 'p-event-1', postId: 'event-1', authorUsername: 'openai', sourceUrl: 'https://x.com/openai/status/event-1', text: 'OpenAI 宣布代理能力的第一项进展。', rawData: { id: 'event-1', text: 'OpenAI 宣布代理能力的第一项进展。' }, createdAt: new Date('2026-09-05T00:00:00Z') };
+    const relatedPost = { id: 'p-event-2', postId: 'event-2', authorUsername: 'openai', sourceUrl: 'https://x.com/openai/status/event-2', text: 'OpenAI 补充代理能力的开放范围。', rawData: { id: 'event-2', text: 'OpenAI 补充代理能力的开放范围。' }, createdAt: new Date('2026-09-05T00:10:00Z') };
+    const primary = { id: 'j-event-1', status: 'detected', metadata: {}, detectedAt: primaryPost.createdAt, postId: primaryPost.id, sourceId: 's-event', post: primaryPost, source: { handle: 'openai' }, draft: null };
+    const related = { id: 'j-event-2', status: 'detected', metadata: {}, detectedAt: relatedPost.createdAt, postId: relatedPost.id, sourceId: 's-event', post: relatedPost, source: { handle: 'openai' }, draft: null };
+    const updates = [];
+    const prisma = {
+      earlyBirdArticleJob: {
+        findUnique: vi.fn(async () => primary),
+        findMany: vi.fn(async () => [related]),
+        update: vi.fn(async ({ where, data }) => { updates.push({ where, data }); return { ...primary, ...data }; }),
+      },
+      earlyBirdPost: { update: vi.fn(async () => ({})) },
+    };
+    const briefText = Array.from({ length: 8 }, () => '官方披露把产品范围、可用方式和后续观察重点说得更具体，读者可以据此判断这一轮变化的实际边界。').join('\n\n');
+    const eventParagraphs = Array.from({ length: 12 }, () => '第一条公告交代了代理能力的基础范围，第二条公告补上开放条件和时间顺序，第三条公告则把接下来可验证的产品动作留给读者继续观察。'.repeat(3));
+    const eventText = `![事件图一](${imagePaths[0]})\n\n## 第一条消息确认了什么\n\n${eventParagraphs.slice(0, 4).join('\n\n')}\n\n![事件图二](${imagePaths[1]})\n\n## 第二条消息补上了哪些边界\n\n${eventParagraphs.slice(4, 8).join('\n\n')}\n\n![事件图三](${imagePaths[2]})\n\n## 这条时间线接下来指向哪里\n\n${eventParagraphs.slice(8).join('\n\n')}`;
+    const llmClient = { complete: vi.fn(async ({ system, user }) => {
+      const input = JSON.parse(user);
+      if (system.includes('Humanizer-zh')) return { markdown: input.markdown, score: 48 };
+      return input.editorial?.contentType === 'event'
+        ? { title: '代理能力的两条公告如何连起来', digest: '两条官方消息补齐了同一能力的时间线。', markdown: eventText }
+        : { title: '代理能力更新', digest: '官方公布了新的代理能力信息。', markdown: `![快讯图](${imagePaths[0]})\n\n${briefText}` };
+    }) };
+    const reviewer = {
+      triage: vi.fn(async () => ({ decision: 'pass', contentType: 'brief', qualityScore: 90, issues: [], rewriteInstructions: '', relatedJobIds: [], visualPlan: [] })),
+      reviewDraft: vi.fn()
+        .mockResolvedValueOnce({ decision: 'merge', contentType: 'event', qualityScore: 72, issues: ['两条公告应合成时间线'], rewriteInstructions: '按时间线合稿', relatedJobIds: [related.id], visualPlan: [] })
+        .mockResolvedValueOnce({ decision: 'pass', contentType: 'event', qualityScore: 93, issues: [], rewriteInstructions: '', relatedJobIds: [related.id], visualPlan: [] }),
+    };
+    const pipeline = createArticlePipeline({
+      prisma, reviewer, llmClient, wechatClient: null,
+      scraperFactory: async () => ({ scrapeFullThread: async post => [post] }),
+      mediaPipeline: { collect: vi.fn(async ({ post }) => post.id === primaryPost.id ? imagePaths.map((localPath, index) => ({ id: `a-${index}`, kind: 'image', sourceUrl: `https://image.example/${index}`, localPath, metadata: { tweetId: primaryPost.postId } })) : []) },
+      evidence: vi.fn(async () => { throw new Error('evidence unavailable'); }),
+      analyze: vi.fn(async () => ({ translation: '', digest: '官方披露代理能力更新。', facts: ['两条公告来自同一产品更新。'] })),
+      notifier: null,
+    });
+    try {
+      await expect(pipeline.process(primary.id)).resolves.toMatchObject({ status: 'rendered' });
+      expect(reviewer.reviewDraft).toHaveBeenCalledTimes(2);
+      expect(updates).toContainEqual(expect.objectContaining({ where: { id: related.id }, data: expect.objectContaining({ status: 'merged' }) }));
     } finally {
       if (originalThreadWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
       else process.env.EARLYBIRD_THREAD_WAIT_MS = originalThreadWait;
@@ -613,7 +746,7 @@ function draftPipelineFixture(coverImageGenerator) {
     earlyBirdAsset: { findMany: vi.fn(async () => [sourceImage]), update: vi.fn(async () => sourceImage) },
     earlyBirdDraft: { upsert: vi.fn(async ({ create }) => create) },
   };
-  const body = '这是一段经过核查的官方技术更新，说明新能力的范围、使用方式和接下来值得关注的问题。'.repeat(4);
+  const body = `这是一段经过核查的官方技术更新，说明新能力覆盖的产品范围、开发者接入方式以及用户能够立即确认的使用边界。它没有把产品承诺写成已经发生的结果，而是把官方说明与当前可用状态分开交代。\n\n![官方素材](${fixturePath})\n\n${'后续最值得观察的是该能力的实际开放范围、稳定性反馈和官方是否补充更具体的技术细节。'.repeat(8)}`;
   const llmClient = { complete: vi.fn(async ({ system }) => {
     if (system.includes('Humanizer-zh')) return { markdown: body, score: 48 };
     return { title: '官方发布新能力', digest: '官方公布了新的技术能力。', markdown: body };
@@ -623,6 +756,11 @@ function draftPipelineFixture(coverImageGenerator) {
     uploadArticleImage: vi.fn(async () => ({ url: 'https://wechat.test/article-image' })),
     addDraft: vi.fn(async () => ({ media_id: 'draft-media' })),
     getDraft: vi.fn(async () => ({ media_id: 'draft-media' })),
+    deleteDraft: vi.fn(async () => ({})),
+  };
+  const reviewer = {
+    triage: vi.fn(async () => ({ decision: 'pass', contentType: 'brief', qualityScore: 92, issues: [], rewriteInstructions: '', relatedJobIds: [], visualPlan: [] })),
+    reviewDraft: vi.fn(async () => ({ decision: 'pass', contentType: 'brief', qualityScore: 92, issues: [], rewriteInstructions: '', relatedJobIds: [], visualPlan: [] })),
   };
   return {
     pipeline: createArticlePipeline({
@@ -635,10 +773,12 @@ function draftPipelineFixture(coverImageGenerator) {
       analyze: vi.fn(async () => ({ translation: '官方公告', digest: '官方公布了新的技术能力。', facts: ['新能力已经发布。'] })),
       coverImageGenerator,
       notifier: null,
+      reviewer,
     }),
     wechatClient,
     updates,
     sourceImage,
+    reviewer,
   };
 }
 

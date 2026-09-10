@@ -3,24 +3,23 @@
   'use strict';
 
   const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001/api' : '/api';
-  const statusLabels = { detected: '已发现', classified: '已判别', held: '等待合并', captured: '已采集', analyzed: '已分析', written: '已写作', humanized: '已审稿', rendered: '已排版', draft_created: '已创建草稿', manual_review: '人工审核', verified: '已验证', merged: '已并入主稿', failed: '失败', ignored: '已忽略' };
+  const statusLabels = { detected: '等待编辑批次', editorial_review: '总编辑审核', writing: '写作中', revising: '定向改写', quality_review: '质量审核', manual_review: '人工审核', verified: '已验证', merged: '已并入主稿', rendered: '已排版', failed: '失败', ignored: '已忽略' };
   const pipelineSteps = [
-    ['detected', '已发现', 'blue'],
-    ['classified', '已判别', 'blue'],
-    ['held', '等待合并', 'yellow'],
-    ['captured', '已采集', 'orange'],
+    ['detected', '等待编辑批次', 'blue'],
+    ['editorial_review', '总编辑审核', 'blue'],
+    ['writing', '写作中', 'orange'],
+    ['revising', '定向改写', 'orange'],
+    ['quality_review', '质量审核', 'orange'],
     ['analyzed', '已分析', 'orange'],
     ['written', '已写作', 'orange'],
-    ['humanized', '已审稿', 'orange'],
     ['rendered', '已排版', 'orange'],
-    ['draft_created', '已创建草稿', 'green'],
     ['manual_review', '人工审核', 'yellow'],
     ['verified', '已验证', 'green'],
     ['merged', '已并入主稿', 'muted'],
     ['failed', '失败', 'red'],
     ['ignored', '已忽略', 'muted'],
   ];
-  const readiness = [['xCookies', 'X Cookie', '允许采集器读取来源'], ['llm', '多模态模型', '翻译、摘要和公众号写作'], ['coverImage', '封面图服务', '生成 900×383 公众号专属封面'], ['wechat', '微信公众号', '创建和回读草稿'], ['redis', 'Redis 队列', '调度采集与文章任务'], ['mediaDir', '媒体目录', '保存证据和视频素材']];
+  const readiness = [['xCookies', 'X Cookie', '允许采集器读取来源'], ['llm', '多模态模型', '翻译、摘要和公众号写作'], ['editorialReview', '审核模型', '独立总编辑与稿件质量审核'], ['braveImageSearch', 'Brave 图片检索', '从全网补充并记录正文图片出处'], ['coverImage', '封面图服务', '生成 900×383 公众号专属封面'], ['wechat', '微信公众号', '创建和回读草稿'], ['redis', 'Redis 队列', '调度采集与文章任务'], ['mediaDir', '媒体目录', '保存证据和视频素材']];
   let timer;
 
   const $ = id => document.getElementById(id);
@@ -52,7 +51,7 @@
     $('metric-posts').textContent = data.metrics.postsToday;
     $('metric-jobs').textContent = data.metrics.jobsToday;
     $('metric-drafts').textContent = data.metrics.verifiedDrafts;
-    $('metric-drafts-detail').textContent = `共 ${data.metrics.drafts} 个草稿`;
+    $('metric-drafts-detail').textContent = `共 ${data.metrics.drafts} 个草稿 · ${data.metrics.manualReview} 篇待人工`;
 
     const total = Object.values(data.pipeline).reduce((sum, count) => sum + Number(count || 0), 0);
     $('pipeline-total').textContent = `${total} 个任务`;
@@ -79,7 +78,7 @@
   function renderAttention(items) {
     if (!items.length) { $('attention-list').innerHTML = '<p class="empty-state">目前没有卡住的任务，继续观察下一次轮询。</p>'; return; }
     $('attention-list').replaceChildren(...items.map(item => {
-      const row = document.createElement('div'); row.className = 'attention-row'; const badge = document.createElement('span'); badge.className = `attention-badge ${item.status}`; badge.textContent = statusLabels[item.status] || item.status; const main = document.createElement('div'); main.className = 'attention-main'; const strong = document.createElement('strong'); strong.textContent = item.reason || `${item.source} 的任务尚未进入下一步`; const small = document.createElement('small'); small.textContent = `${item.source} · ${dateTime(item.updatedAt)}${item.postId ? ` · X 帖子 ${item.postId}` : ''}`; main.append(strong, small); row.append(badge, main); if (item.status === 'failed' && localStorage.getItem('authToken')) { const button = document.createElement('button'); button.className = 'button-secondary'; button.type = 'button'; button.dataset.retryJob = item.id; button.textContent = '重试'; row.append(button); } else if (item.status === 'failed') { const hint = document.createElement('span'); hint.className = 'retry-hint'; hint.textContent = '登录后可重试'; row.append(hint); } return row;
+      const row = document.createElement('div'); row.className = 'attention-row'; const badge = document.createElement('span'); badge.className = `attention-badge ${item.status}`; badge.textContent = statusLabels[item.status] || item.status; const main = document.createElement('div'); main.className = 'attention-main'; const strong = document.createElement('strong'); strong.textContent = item.reason || `${item.source} 的任务尚未进入下一步`; const small = document.createElement('small'); small.textContent = `${item.source} · ${dateTime(item.updatedAt)}${item.postId ? ` · X 帖子 ${item.postId}` : ''}`; main.append(strong, small); row.append(badge, main); if (['failed', 'manual_review'].includes(item.status) && localStorage.getItem('authToken')) { const button = document.createElement('button'); button.className = 'button-secondary'; button.type = 'button'; button.dataset.reviewJob = item.id; button.dataset.reviewMode = item.status === 'manual_review' ? 'review' : 'retry'; button.textContent = item.status === 'manual_review' ? '重新审核' : '重试'; row.append(button); } else if (['failed', 'manual_review'].includes(item.status)) { const hint = document.createElement('span'); hint.className = 'retry-hint'; hint.textContent = '登录后可处理'; row.append(hint); } return row;
     }));
   }
 
@@ -111,6 +110,6 @@
     }
   }
 
-  document.addEventListener('click', async event => { const button = event.target.closest('[data-retry-job]'); if (!button) return; button.disabled = true; button.textContent = '提交中'; try { await request(`/earlybird/jobs/${button.dataset.retryJob}/retry`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }); await load(); } catch (error) { button.disabled = false; button.textContent = '重试'; $('error-message').textContent = error.message === 'Failed to fetch' ? 'API 未启动或网络不可达。' : error.message; setHidden('error-state', false); } });
+  document.addEventListener('click', async event => { const button = event.target.closest('[data-review-job]'); if (!button) return; const mode = button.dataset.reviewMode; button.disabled = true; button.textContent = '提交中'; try { await request(`/earlybird/jobs/${button.dataset.reviewJob}/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }); await load(); } catch (error) { button.disabled = false; button.textContent = mode === 'retry' ? '重试' : '重新审核'; $('error-message').textContent = error.message === 'Failed to fetch' ? 'API 未启动或网络不可达。' : error.message; setHidden('error-state', false); } });
   $('refresh-button').addEventListener('click', load); $('retry-button').addEventListener('click', load); load(); timer = window.setInterval(load, 30_000); window.addEventListener('beforeunload', () => window.clearInterval(timer));
 }());
