@@ -26,8 +26,8 @@ export async function searchXViaBrowser({ query, cookieHeader, limit = 6, browse
     await page.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
     await page.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
     await page.setCookie(...xBrowserCookies(cookieHeader));
-    await page.goto(`https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query&f=live`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForSelector('article[data-testid="tweet"]', { timeout: 30000 });
+    await page.goto(`https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query&f=live`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForSelector('article[data-testid="tweet"]', { timeout: 12000 });
     const tweets = new Map();
     for (let attempt = 0; attempt < 4 && tweets.size < limit; attempt += 1) {
       const items = await page.evaluate(() => Array.from(document.querySelectorAll('article[data-testid="tweet"]')).map(article => {

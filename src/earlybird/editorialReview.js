@@ -46,6 +46,16 @@ function defaultVisualPlan(job, count) {
   }));
 }
 
+function defaultResearchPlan(job) {
+  const handle = compact(job?.source?.handle || job?.post?.authorUsername, 40).replace(/^@/, '');
+  const subject = compact(job?.post?.text || job?.metadata?.analysis?.digest, 180);
+  const query = subject || `${handle || 'AI'} product announcement`;
+  return {
+    xQueries: [{ query: handle ? `from:${handle} ${query}` : query, purpose: '补充同一发布的原始公告和直接上下文', scope: 'official' }],
+    webQueries: [{ query, purpose: '核对来源官网的产品范围、时间线和技术说明', scope: 'official' }],
+  };
+}
+
 export function contentStandard(contentType) {
   return ARTICLE_STANDARDS[contentType] || ARTICLE_STANDARDS.explainer;
 }
@@ -76,7 +86,7 @@ export function normalizeEditorialDecision(raw, { job, candidates = [], phase = 
   const rewriteInstructions = compact(raw?.rewriteInstructions || raw?.reason || '', 1200);
   const selectedResearchUrls = [...new Set((Array.isArray(raw?.selectedResearchUrls) ? raw.selectedResearchUrls : [])
     .map(value => String(value)).filter(url => knownResearchUrls.has(url)))].slice(0, 12);
-  const researchPlan = normalizeResearchPlan(raw?.researchPlan);
+  let researchPlan = normalizeResearchPlan(raw?.researchPlan);
 
   if (decision === 'merge' && !candidateIds.length) {
     decision = 'rewrite';
@@ -92,6 +102,9 @@ export function normalizeEditorialDecision(raw, { job, candidates = [], phase = 
   if (phase === 'draft' && decision === 'pass' && score(raw?.qualityScore, 0) < 80) {
     decision = 'rewrite';
     issues.unshift('质量评分未达到自动通过阈值');
+  }
+  if (phase === 'triage' && ['explainer', 'event'].includes(contentType) && !researchPlan.xQueries.length && !researchPlan.webQueries.length) {
+    researchPlan = defaultResearchPlan(job);
   }
 
   return {

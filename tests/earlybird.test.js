@@ -271,6 +271,13 @@ describe('independent editorial review', () => {
     expect(decision.issues).toContain('合稿决定未给出可关联的候选内容');
   });
 
+  it('requires an active research pass for explainer and event plans', () => {
+    const decision = normalizeEditorialDecision({ decision: 'pass', contentType: 'explainer', qualityScore: 85, researchPlan: {} }, { job, candidates: [candidate] });
+    expect(decision.researchPlan.xQueries).toHaveLength(1);
+    expect(decision.researchPlan.webQueries).toHaveLength(1);
+    expect(decision.researchPlan.webQueries[0].scope).toBe('official');
+  });
+
   it('keeps editor and draft review decisions separate', async () => {
     const client = { complete: vi.fn()
       .mockResolvedValueOnce({ decision: 'merge', contentType: 'event', qualityScore: 91, relatedJobIds: ['j-related'], visualPlan: [] })
