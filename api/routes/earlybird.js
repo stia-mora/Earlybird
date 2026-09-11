@@ -47,6 +47,7 @@ function serviceStatus(lastPolledAt, pollIntervalSeconds) {
 
 function dashboardJobNote(job) {
   if (job.status === 'editorial_review') return '独立总编辑正在判断文章类型、关联内容和配图计划。';
+  if (job.status === 'researching') return '总编辑正在主动检索 X 和网页证据，随后重新决定选题或合稿。';
   if (job.status === 'writing' || job.status === 'revising') return '稿件正按审核意见写作或定向重写。';
   if (job.status === 'quality_review') return '独立审校正在检查事实、故事线、自然度和图文对应关系。';
   if (job.status === 'ignored') return '旧版筛选留下的历史任务，重新处理后会直接进入写作。';
@@ -100,7 +101,7 @@ router.get('/overview', async (_req, res) => {
 
     const counts = Object.fromEntries(jobGroups.map(group => [group.status, group._count._all]));
     const attention = jobs
-      .filter(job => ['failed', 'manual_review', 'detected', 'editorial_review', 'writing', 'revising', 'quality_review', 'analyzed', 'written', 'rendered', 'ignored'].includes(job.status))
+      .filter(job => ['failed', 'manual_review', 'detected', 'editorial_review', 'researching', 'writing', 'revising', 'quality_review', 'analyzed', 'written', 'rendered', 'ignored'].includes(job.status))
       .slice(0, 8)
       .map(job => ({ id: job.id, status: job.status, reason: dashboardJobNote(job), source: job.source?.displayName || job.source?.handle || '未知来源', postId: job.post?.postId || '', updatedAt: job.updatedAt }));
     const safeJobs = jobs.map(job => ({ ...job, note: dashboardJobNote(job), review: job.editorialReviews?.[0] || job.metadata?.review || null }));
@@ -120,6 +121,7 @@ router.get('/overview', async (_req, res) => {
         llm: Boolean(process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY),
         editorialReview: Boolean(process.env.EARLYBIRD_LLM_API_KEY || process.env.OPENAI_API_KEY),
         tavilyImageSearch: Boolean(process.env.EARLYBIRD_TAVILY_API_KEY),
+        editorialXSearch: Boolean(process.env.X_COOKIES || process.env.TWITTER_COOKIES || process.env.EARLYBIRD_X_COOKIES_FILE),
         coverImage: Boolean(process.env.EARLYBIRD_COVER_IMAGE_API_KEY && process.env.EARLYBIRD_COVER_IMAGE_BASE_URL),
         wechat: Boolean(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET),
         redis: Boolean(process.env.REDIS_URL || process.env.REDIS_HOST),

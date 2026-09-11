@@ -19,7 +19,9 @@ import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
 import { availableFixedEndVisuals } from '../src/earlybird/fixedEndVisuals.js';
 import { buildCoverPrompt, createCoverImageGenerator, normalizeCoverImage, WECHAT_COVER_SIZE } from '../src/earlybird/coverImage.js';
-import { createEditorialReviewer, draftQualityIssues, normalizeEditorialDecision } from '../src/earlybird/editorialReview.js';
+import { createEditorialOrchestrator, createEditorialReviewer, draftQualityIssues, normalizeEditorialDecision } from '../src/earlybird/editorialReview.js';
+import { gatherEditorialResearch, normalizeResearchPlan, selectEditorialResearch } from '../src/earlybird/editorialResearch.js';
+import { createEditorialXSearch } from '../src/earlybird/xResearchSearch.js';
 import { collectTavilyImages, createTavilyImageSearch, normalizeTavilyImageResult } from '../src/earlybird/tavilyImageSearch.js';
 
 function prismaFixture() {
@@ -286,6 +288,65 @@ describe('independent editorial review', () => {
   it('flags a draft with insufficient body, images, or sources before model approval', () => {
     const issues = draftQualityIssues({ markdown: '很短的说明。', contentType: 'explainer', assets: [], references: [] });
     expect(issues).toEqual(expect.arrayContaining(['正文不足 1200 个中文字符', '需要至少 3 张可用正文图片', '缺少可核查的来源链接']));
+  });
+
+  it('lets the orchestrator select only evidence returned by its bounded research plan', async () => {
+    const client = { complete: vi.fn(async () => ({
+      decision: 'pass', contentType: 'explainer', qualityScore: 88,
+      selectedResearchUrls: ['https://x.com/openai/status/200', 'https://not-returned.example/article'],
+      visualPlan: [], researchPlan: { xQueries: [], webQueries: [] },
+    })) };
+    const orchestrator = createEditorialOrchestrator({ client });
+    const research = {
+      xEvidence: [{ kind: 'x', id: 'x:200', url: 'https://x.com/openai/status/200', author: 'openai', text: '官方补充了开放范围。' }],
+      webEvidence: [{ kind: 'web', id: 'web:https://openai.com/blog', url: 'https://openai.com/blog', title: '官方说明', excerpt: '官方网页说明。', sourceDomain: 'openai.com' }],
+      failures: [],
+    };
+    const decision = await orchestrator.coordinate({ job, candidates: [candidate], triage: { decision: 'rewrite' }, research });
+    expect(decision.selectedResearchUrls).toEqual(['https://x.com/openai/status/200']);
+    expect(client.complete.mock.calls[0][0].system).toContain('主动检索');
+  });
+});
+
+describe('editorial research', () => {
+  it('limits duplicate research queries and normalizes their shape', () => {
+    const plan = normalizeResearchPlan({
+      xQueries: ['OpenAI agent', 'OpenAI agent', 'query 2', 'query 3', 'query 4'],
+      webQueries: [{ query: 'OpenAI official announcement', purpose: '核实事实' }, { query: 'query 2' }, { query: 'query 3' }, { query: 'query 4' }],
+    });
+    expect(plan.xQueries).toHaveLength(3);
+    expect(plan.xQueries[0]).toEqual({ query: 'OpenAI agent', purpose: '', scope: 'official' });
+    expect(plan.webQueries).toHaveLength(3);
+  });
+
+  it('collects read-only X and Tavily evidence with their query provenance', async () => {
+    const tavilySearch = { configured: true, searchWeb: vi.fn(async () => [{ title: '官方公告', url: 'https://openai.com/news', sourceDomain: 'openai.com', excerpt: '官方说明了适用范围。', query: 'OpenAI agents official' }]) };
+    const research = await gatherEditorialResearch({
+      plan: { xQueries: [{ query: 'OpenAI agents', purpose: '寻找原始公告' }], webQueries: [{ query: 'OpenAI agents official', purpose: '核对范围' }] },
+      source: { handle: 'openai', website: 'https://openai.com' },
+      scraperFactory: async () => ({ searchTweets: vi.fn(async () => [{ id: 'x-1', text: '官方发布代理能力。', createdAt: '2026-09-11T00:00:00Z', author: { username: 'openai' }, media: [] }]) }),
+      tavilySearch,
+    });
+    expect(research.xEvidence).toEqual([expect.objectContaining({ url: 'https://x.com/openai/status/x-1', query: 'OpenAI agents' })]);
+    expect(research.webEvidence).toEqual([expect.objectContaining({ url: 'https://openai.com/news', sourceDomain: 'openai.com' })]);
+    expect(research.webEvidence).toHaveLength(1);
+    expect(tavilySearch.searchWeb).toHaveBeenCalledWith('OpenAI agents official', { count: 4, includeDomains: ['openai.com'] });
+    const selected = selectEditorialResearch(research, ['https://openai.com/news']);
+    expect(selected.xEvidence).toEqual([]);
+    expect(selected.citations).toEqual([expect.objectContaining({ url: 'https://openai.com/news' })]);
+  });
+
+  it('falls back to browser X search when SearchTimeline is unavailable', async () => {
+    const browserSearch = vi.fn(async () => [{ id: 'browser-1', text: '浏览器搜索到官方更新。', author: { username: 'openai' }, media: [] }]);
+    const xSearch = createEditorialXSearch({
+      scraperFactory: async () => ({ searchTweets: async () => { throw new Error('HTTP 404: Not Found'); } }),
+      cookieLoader: async () => 'auth_token=test; ct0=test',
+      browserSearch,
+      logger: { warn: vi.fn() },
+    });
+    const result = await xSearch.search('from:openai', { source: { handle: 'openai' }, limit: 2 });
+    expect(result).toMatchObject({ method: 'browser', tweets: [expect.objectContaining({ id: 'browser-1' })] });
+    expect(browserSearch).toHaveBeenCalledWith(expect.objectContaining({ query: 'from:openai', limit: 2 }));
   });
 });
 

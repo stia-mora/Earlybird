@@ -3,10 +3,11 @@
   'use strict';
 
   const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001/api' : '/api';
-  const statusLabels = { detected: '等待编辑批次', editorial_review: '总编辑审核', writing: '写作中', revising: '定向改写', quality_review: '质量审核', manual_review: '人工审核', verified: '已验证', merged: '已并入主稿', rendered: '已排版', failed: '失败', ignored: '已忽略' };
+  const statusLabels = { detected: '等待编辑批次', editorial_review: '总编辑审核', researching: '主动补证据', writing: '写作中', revising: '定向改写', quality_review: '质量审核', manual_review: '人工审核', verified: '已验证', merged: '已并入主稿', rendered: '已排版', failed: '失败', ignored: '已忽略' };
   const pipelineSteps = [
     ['detected', '等待编辑批次', 'blue'],
     ['editorial_review', '总编辑审核', 'blue'],
+    ['researching', '主动补证据', 'blue'],
     ['writing', '写作中', 'orange'],
     ['revising', '定向改写', 'orange'],
     ['quality_review', '质量审核', 'orange'],
@@ -19,7 +20,7 @@
     ['failed', '失败', 'red'],
     ['ignored', '已忽略', 'muted'],
   ];
-  const readiness = [['xCookies', 'X Cookie', '允许采集器读取来源'], ['llm', '多模态模型', '翻译、摘要和公众号写作'], ['editorialReview', '审核模型', '复用写作模型执行独立总编辑与质量审核'], ['tavilyImageSearch', 'Tavily 图片检索', '从全网补充并记录正文图片出处'], ['coverImage', '封面图服务', '生成 900×383 公众号专属封面'], ['wechat', '微信公众号', '创建和回读草稿'], ['redis', 'Redis 队列', '调度采集与文章任务'], ['mediaDir', '媒体目录', '保存证据和视频素材']];
+  const readiness = [['xCookies', 'X Cookie', '允许采集器读取来源'], ['editorialXSearch', 'X 主动搜索', '总编辑按需检索原始公告和同事件上下文'], ['llm', '多模态模型', '翻译、摘要和公众号写作'], ['editorialReview', '审核模型', '复用写作模型执行独立总编辑与质量审核'], ['tavilyImageSearch', 'Tavily 网页与图片检索', '总编辑按需补充网页证据和正文配图'], ['coverImage', '封面图服务', '生成 900×383 公众号专属封面'], ['wechat', '微信公众号', '创建和回读草稿'], ['redis', 'Redis 队列', '调度采集与文章任务'], ['mediaDir', '媒体目录', '保存证据和视频素材']];
   let timer;
 
   const $ = id => document.getElementById(id);

@@ -72,7 +72,7 @@ export async function createHttpScraper(options = {}) {
     await auth.loginWithCookies(options.cookies);
   }
 
-  const [profileMod, relationshipsMod, tweetsMod, threadMod, actionsMod, engagementMod, mediaMod, communitiesMod, notificationsMod, exploreMod] = await Promise.all([
+  const [profileMod, relationshipsMod, tweetsMod, threadMod, actionsMod, engagementMod, mediaMod, communitiesMod, notificationsMod, exploreMod, searchMod] = await Promise.all([
     import('./profile.js'),
     import('./relationships.js'),
     import('./tweets.js'),
@@ -83,6 +83,7 @@ export async function createHttpScraper(options = {}) {
     import('./communities.js'),
     import('./notifications.js'),
     import('./explore.js'),
+    import('./search.js'),
   ]);
 
   return {
@@ -107,6 +108,9 @@ export async function createHttpScraper(options = {}) {
     scrapeTweetById: (tweetId) => tweetsMod.scrapeTweetById(client, tweetId),
     parseTweetData: tweetsMod.parseTweetData,
     parseTimelineInstructions: tweetsMod.parseTimelineInstructions,
+
+    // Search
+    searchTweets: (query, opts) => searchMod.searchTweets(client, query, opts),
 
     // Thread
     scrapeThread: (tweetId, opts) => threadMod.scrapeThread(client, tweetId, opts),

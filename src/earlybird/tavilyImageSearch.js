@@ -41,23 +41,27 @@ export function normalizeTavilyImageResult(image, query, sourcePageUrl = null) {
 }
 
 export function createTavilyImageSearch({ apiKey = process.env.EARLYBIRD_TAVILY_API_KEY, fetchImpl = globalThis.fetch, endpoint = 'https://api.tavily.com/search' } = {}) {
+  async function request(body) {
+    const response = await fetchImpl(endpoint, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(`Tavily search failed (${response.status}): ${compact(data?.detail || data?.error || data?.message, 180)}`);
+    return data;
+  }
   return {
     configured: Boolean(apiKey),
     async search(query, { count = 8 } = {}) {
       if (!apiKey) return [];
-      const response = await fetchImpl(endpoint, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          query: compact(query, 400),
-          max_results: Math.max(1, Math.min(20, count)),
-          search_depth: 'basic',
-          include_images: true,
-          include_image_descriptions: true,
-        }),
+      const data = await request({
+        query: compact(query, 400),
+        max_results: Math.max(1, Math.min(20, count)),
+        search_depth: 'basic',
+        include_images: true,
+        include_image_descriptions: true,
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(`Tavily image search failed (${response.status}): ${compact(data?.detail || data?.error || data?.message, 180)}`);
       const nested = (data.results || []).flatMap(result => (result.images || []).map(image => normalizeTavilyImageResult(image, query, result.url)));
       const topLevel = (data.images || []).map(image => normalizeTavilyImageResult(image, query));
       const seen = new Set();
@@ -66,6 +70,30 @@ export function createTavilyImageSearch({ apiKey = process.env.EARLYBIRD_TAVILY_
         seen.add(image.imageUrl);
         return true;
       });
+    },
+    async searchWeb(query, { count = 4, includeDomains = [] } = {}) {
+      if (!apiKey) return [];
+      const data = await request({
+        query: compact(query, 400),
+        max_results: Math.max(1, Math.min(8, count)),
+        search_depth: 'basic',
+        include_answer: false,
+        include_images: false,
+        include_raw_content: false,
+        ...(includeDomains.length ? { include_domains: includeDomains.slice(0, 8) } : {}),
+      });
+      return (data.results || []).map(result => {
+        const url = safeUrl(result?.url);
+        if (!url) return null;
+        return {
+          title: compact(result?.title),
+          url: url.toString(),
+          sourceDomain: url.hostname,
+          excerpt: compact(result?.content, 900),
+          score: Number(result?.score) || null,
+          query: compact(query),
+        };
+      }).filter(Boolean);
     },
   };
 }

@@ -6,6 +6,8 @@ export * from './mediaPipeline.js';
 export * from './evidenceCapture.js';
 export * from './aiPipeline.js';
 export * from './editorialReview.js';
+export * from './editorialResearch.js';
+export * from './xResearchSearch.js';
 export * from './tavilyImageSearch.js';
 export * from './articleWriter.js';
 export * from './humanizer.js';

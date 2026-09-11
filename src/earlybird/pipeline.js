@@ -12,7 +12,9 @@ import { createHermesNotifier } from './hermesNotifier.js';
 import { availableFixedEndVisuals } from './fixedEndVisuals.js';
 import { createCoverImageGenerator } from './coverImage.js';
 import { collectTavilyImages, createTavilyImageSearch } from './tavilyImageSearch.js';
-import { contentStandard, createEditorialReviewer, reviewInputHash } from './editorialReview.js';
+import { contentStandard, createEditorialOrchestrator, reviewInputHash } from './editorialReview.js';
+import { emptyEditorialResearch, gatherEditorialResearch, hasResearchPlan, selectEditorialResearch } from './editorialResearch.js';
+import { createEditorialXSearch } from './xResearchSearch.js';
 
 const MAX_REWRITE_ATTEMPTS = 3;
 
@@ -66,8 +68,13 @@ function postEvidenceAsset(post, localPath) {
   return { kind: 'x-post-evidence', localPath, sourceUrl: post.sourceUrl, metadata: { altText: `@${post.authorUsername || 'unknown'} 的 X 原帖截图` } };
 }
 
-function articleReferences(storyPosts, assets) {
-  return [...new Set([...storyPosts.map(post => post.sourceUrl), ...(assets || []).map(asset => asset.metadata?.sourcePageUrl)].filter(Boolean))];
+function articleReferences(storyPosts, assets, research = {}) {
+  return [...new Set([
+    ...storyPosts.map(post => post.sourceUrl),
+    ...(assets || []).map(asset => asset.metadata?.sourcePageUrl),
+    ...(research.citations || []).map(citation => citation.url),
+    ...(research.xEvidence || []).map(evidence => evidence.url),
+  ].filter(Boolean))];
 }
 
 function videoPosterPath(assets) {
@@ -88,9 +95,26 @@ async function capturePostEvidence({ evidence, post, assets, outputPath, thread,
 function metadataWithReview(metadata, editorial, review) {
   return {
     ...metadata,
-    editorial: { ...editorial, decision: review.decision, qualityScore: review.qualityScore, issues: review.issues, relatedJobIds: review.relatedJobIds, visualPlan: review.visualPlan },
+    editorial: { ...editorial, decision: review.decision, qualityScore: review.qualityScore, issues: review.issues, relatedJobIds: review.relatedJobIds, selectedResearchUrls: review.selectedResearchUrls, researchPlan: review.researchPlan, visualPlan: review.visualPlan },
     review: { decision: review.decision, qualityScore: review.qualityScore, issues: review.issues, rewriteInstructions: review.rewriteInstructions, at: new Date().toISOString() },
   };
+}
+
+function externalStoryPost(evidence) {
+  return {
+    id: evidence.id,
+    postId: evidence.id,
+    authorUsername: evidence.author || evidence.sourceDomain || 'source',
+    sourceUrl: evidence.url,
+    createdAt: evidence.createdAt || null,
+    text: evidence.text || evidence.excerpt || evidence.title || '',
+    rawData: evidence,
+  };
+}
+
+function externalStoryJob(evidence) {
+  const post = externalStoryPost(evidence);
+  return { id: evidence.id, post, source: { handle: post.authorUsername }, metadata: { analysis: { digest: evidence.excerpt || evidence.text || '' } } };
 }
 
 async function saveReview(prisma, job, phase, attempt, decision, input) {
@@ -164,13 +188,14 @@ export async function replaceManagedDrafts({ prisma, wechatClient, primaryJob, s
 }
 
 export function createArticlePipeline({
-  prisma, scraperFactory, llmClient = createMultimodalClient(), reviewClient, reviewer,
+  prisma, scraperFactory, llmClient = createMultimodalClient(), reviewClient, orchestrator, reviewer,
   wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence,
   analyze = analyzePost, notifier = createHermesNotifier({ prisma }), coverImageGenerator = createCoverImageGenerator(),
-  imageSearch = createTavilyImageSearch(), collectWebImages = collectTavilyImages, logger = console, now = () => new Date(),
+  imageSearch = createTavilyImageSearch(), xSearch, collectWebImages = collectTavilyImages, logger = console, now = () => new Date(),
 } = {}) {
   const writer = createArticleWriter({ client: llmClient });
-  const editorialReviewer = reviewer || createEditorialReviewer({ client: reviewClient || llmClient });
+  const editorialOrchestrator = orchestrator || reviewer || createEditorialOrchestrator({ client: reviewClient || llmClient });
+  const editorialXSearch = xSearch || createEditorialXSearch({ scraperFactory, logger });
 
   async function manualReview(job, metadata, reason) {
     const updated = await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'manual_review', error: reason, metadata } });
@@ -194,22 +219,34 @@ export function createArticlePipeline({
       try {
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'editorial_review', attempts: { increment: 1 }, error: null } });
         const candidates = await candidateJobs(prisma, job, { dailyReview, now: now() });
-        const triage = preselectedDecision || await editorialReviewer.triage({ job, candidates });
+        let triage = preselectedDecision || await editorialOrchestrator.triage({ job, candidates });
         let metadata = metadataWithReview(priorMetadata, triage, triage);
         await saveReview(prisma, job, dailyReview ? 'daily_triage' : 'triage', 1, triage, JSON.stringify({ current: job.id, candidates: candidates.map(item => item.id) }));
+        let research = emptyEditorialResearch(triage.researchPlan);
+        if (hasResearchPlan(triage.researchPlan)) {
+          await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'researching', metadata } });
+          research = await gatherEditorialResearch({ plan: triage.researchPlan, xSearch: editorialXSearch, source: job.source, tavilySearch: imageSearch, logger });
+          const coordinated = typeof editorialOrchestrator.coordinate === 'function'
+            ? await editorialOrchestrator.coordinate({ job, candidates, triage, research })
+            : triage;
+          triage = coordinated;
+          metadata = metadataWithReview({ ...metadata, editorialResearch: research }, triage, triage);
+          await saveReview(prisma, job, 'research_coordination', 1, triage, JSON.stringify(research));
+        }
         if (triage.decision !== 'pass' && triage.decision !== 'merge') return manualReview(job, metadata, triage.issues.join('；') || '总编辑要求人工审核');
 
         const relatedJobs = candidates.filter(item => triage.relatedJobIds.includes(item.id));
         const storyJobs = [job, ...relatedJobs];
+        const selectedResearch = selectEditorialResearch(research, triage.selectedResearchUrls);
         if (dailyReview && job.status === 'verified' && triage.decision === 'pass' && !relatedJobs.length && job.markdown) {
           const storedAssets = await collectAssets({ prisma, mediaPipeline, post: job.post, thread: Array.isArray(job.post.threadData) ? job.post.threadData : [job.post.rawData] });
-          const existingQuality = await editorialReviewer.reviewDraft({
+          const existingQuality = await editorialOrchestrator.reviewDraft({
             job,
             article: { markdown: job.markdown },
             editorial: triage,
             storyPosts: [job],
             assets: storedAssets,
-            references: articleReferences([job.post], storedAssets),
+            references: articleReferences([job.post], storedAssets, selectedResearch),
             attempt: 1,
           });
           metadata = metadataWithReview(metadata, triage, existingQuality);
@@ -220,7 +257,8 @@ export function createArticlePipeline({
         }
         const materials = [];
         for (const storyJob of storyJobs) materials.push(await buildStoryMaterial({ storyJob, prisma, scraperFactory, mediaPipeline, evidence, logger }));
-        const storyPosts = materials.map(item => item.post);
+        const storyPosts = [...materials.map(item => item.post), ...selectedResearch.xEvidence.map(externalStoryPost)];
+        const qualityStoryJobs = [...storyJobs, ...selectedResearch.xEvidence.map(externalStoryJob)];
         const sourceAssets = materials.flatMap(item => item.assets);
         const evidenceAssets = materials.filter(item => item.hasEvidence).map(item => postEvidenceAsset(item.post, item.evidencePath));
         const standard = contentStandard(triage.contentType);
@@ -235,9 +273,9 @@ export function createArticlePipeline({
         const analysisPost = { ...job.post.rawData, text: job.post.text, storyPosts: storyPosts.map(item => ({ author: item.authorUsername, createdAt: item.createdAt, url: item.sourceUrl, text: item.text })) };
         const analysis = await analyze({ client: llmClient, post: analysisPost, thread: root.thread, assets: allAssets, evidencePath: root.hasEvidence ? root.evidencePath : undefined });
         if (root.hasEvidence) await capturePostEvidence({ evidence, post: job.post, assets: root.assets, outputPath: root.evidencePath, thread: root.thread, translation: analysis.translation, logger });
-        const references = articleReferences(storyPosts, allAssets);
+        const references = articleReferences(storyPosts, allAssets, selectedResearch);
         const editorial = { ...triage, publish: true };
-        metadata = { ...metadata, analysis, research: { citations: [], queries: [] } };
+        metadata = { ...metadata, analysis, research: { citations: selectedResearch.citations, xEvidence: selectedResearch.xEvidence, queries: research.plan, failures: research.failures } };
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'analyzed', metadata } });
 
         let article;
@@ -245,7 +283,7 @@ export function createArticlePipeline({
         for (let attempt = 1; attempt <= MAX_REWRITE_ATTEMPTS; attempt += 1) {
           await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: attempt === 1 ? 'writing' : 'revising' } });
           try {
-            article = await writer.write({ post: job.post, thread: root.thread, analysis, editorial, storyPosts, research: { citations: [], assets: allAssets.filter(asset => ['image', 'web-image'].includes(asset.kind)).map(asset => ({ path: asset.localPath, sourceUrl: asset.sourceUrl, altText: asset.metadata?.altText || '' })) }, assets: articleAssets, sourceUrl: job.post.sourceUrl, previousMarkdown: article?.markdown || '', revisionInstructions: attempt === 1 ? '' : metadata.review?.rewriteInstructions || '' });
+            article = await writer.write({ post: job.post, thread: root.thread, analysis, editorial, storyPosts, research: { citations: selectedResearch.citations, xEvidence: selectedResearch.xEvidence, assets: allAssets.filter(asset => ['image', 'web-image'].includes(asset.kind)).map(asset => ({ path: asset.localPath, sourceUrl: asset.sourceUrl, altText: asset.metadata?.altText || '' })) }, assets: articleAssets, sourceUrl: job.post.sourceUrl, previousMarkdown: article?.markdown || '', revisionInstructions: attempt === 1 ? '' : metadata.review?.rewriteInstructions || '' });
           } catch (error) {
             return manualReview(job, metadata, `自动写作未达到结构标准：${error.message}`);
           }
@@ -253,7 +291,7 @@ export function createArticlePipeline({
           const polished = await humanize({ client: llmClient, markdown: article.markdown, context: { postId: job.post.postId, analysis, editorial } });
           const candidate = { ...article, markdown: polished.markdown };
           await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'quality_review', markdown: candidate.markdown, humanizerScore: polished.score } });
-          const quality = await editorialReviewer.reviewDraft({ job, article: candidate, editorial, storyPosts: storyJobs, candidates, assets: articleAssets, references, attempt });
+          const quality = await editorialOrchestrator.reviewDraft({ job, article: candidate, editorial, storyPosts: qualityStoryJobs, candidates, assets: articleAssets, references, attempt });
           metadata = metadataWithReview(metadata, editorial, quality);
           await saveReview(prisma, job, 'draft', attempt, quality, candidate.markdown);
           const hash = reviewInputHash(candidate.markdown);
