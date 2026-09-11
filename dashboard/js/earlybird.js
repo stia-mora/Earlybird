@@ -84,7 +84,17 @@
   }
 
   function renderActivity(data) {
-    const jobs = data.jobs.map(job => ({ type: '任务', title: `${statusLabels[job.status] || job.status} · ${job.source?.displayName || job.source?.handle || '未知来源'}`, detail: job.note || '正在推进。', time: job.updatedAt }));
+    const researchDetail = review => {
+      if (!review) return '';
+      const plan = review.output?.researchPlan || {};
+      const xCount = plan.xQueries?.length || 0;
+      const webCount = plan.webQueries?.length || 0;
+      const selected = review.output?.selectedResearchUrls?.length || 0;
+      const action = review.decision === 'merge' ? '合稿' : review.decision === 'pass' ? '通过' : review.decision === 'rewrite' ? '改写' : '人工审核';
+      const research = xCount || webCount || selected ? ` · X ${xCount} 条、网页 ${webCount} 条、选证据 ${selected} 条` : '';
+      return `总编${action} · ${review.qualityScore ?? '—'} 分${research}`;
+    };
+    const jobs = data.jobs.map(job => ({ type: '任务', title: `${statusLabels[job.status] || job.status} · ${job.source?.displayName || job.source?.handle || '未知来源'}`, detail: researchDetail(job.review) || job.note || '正在推进。', time: job.updatedAt }));
     const notes = data.notifications.map(note => ({ type: '通知', title: `${note.kind} · ${note.status}`, detail: '通知记录已写入', time: note.createdAt }));
     const items = [...jobs, ...notes].sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 20);
     if (!items.length) { $('activity-list').innerHTML = '<p class="empty-state">还没有任务或通知记录。</p>'; return; }

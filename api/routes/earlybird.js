@@ -51,7 +51,7 @@ function dashboardJobNote(job) {
   if (job.status === 'writing' || job.status === 'revising') return '稿件正按审核意见写作或定向重写。';
   if (job.status === 'quality_review') return '独立审校正在检查事实、故事线、自然度和图文对应关系。';
   if (job.status === 'ignored') return '旧版筛选留下的历史任务，重新处理后会直接进入写作。';
-  if (job.status === 'merged') return job.metadata?.mergeTargetJobId ? `已并入主稿任务 ${job.metadata.mergeTargetJobId}。` : '旧版事件合并留下的历史任务，可单独重新处理。';
+  if (job.status === 'merged') return '已并入总编辑选定的主稿。';
   if (job.status === 'held') return '旧版等待合并留下的历史任务，可直接重新处理。';
   if (job.status === 'manual_review') {
     const issues = job.editorialReviews?.[0]?.issues || job.metadata?.review?.issues || [];
@@ -69,7 +69,7 @@ router.get('/overview', async (_req, res) => {
       prisma.earlyBirdSource.findMany({ orderBy: { handle: 'asc' }, select: { id: true, handle: true, displayName: true, enabled: true, baselineComplete: true, pollIntervalSeconds: true, lastPolledAt: true, updatedAt: true } }),
       prisma.earlyBirdPost.count({ where: { capturedAt: { gte: today } } }),
       prisma.earlyBirdArticleJob.count({ where: { detectedAt: { gte: today } } }),
-      prisma.earlyBirdArticleJob.findMany({ take: 30, orderBy: { updatedAt: 'desc' }, select: { id: true, status: true, updatedAt: true, metadata: true, source: { select: { handle: true, displayName: true } }, post: { select: { postId: true } }, draft: { select: { verified: true } }, editorialReviews: { take: 1, orderBy: { createdAt: 'desc' }, select: { decision: true, qualityScore: true, issues: true, relatedJobIds: true, createdAt: true } } } }),
+      prisma.earlyBirdArticleJob.findMany({ take: 30, orderBy: { updatedAt: 'desc' }, select: { id: true, status: true, updatedAt: true, source: { select: { handle: true, displayName: true } }, post: { select: { postId: true } }, draft: { select: { verified: true } }, editorialReviews: { take: 1, orderBy: { createdAt: 'desc' }, select: { phase: true, decision: true, qualityScore: true, issues: true, relatedJobIds: true, output: true, createdAt: true } } } }),
       prisma.earlyBirdPoll.findMany({ take: 20, orderBy: { polledAt: 'desc' }, select: { id: true, outcome: true, detectedCount: true, polledAt: true, source: { select: { handle: true, displayName: true } } } }),
       prisma.earlyBirdNotification.findMany({ take: 20, orderBy: { createdAt: 'desc' }, select: { kind: true, status: true, createdAt: true } }),
       prisma.earlyBirdArticleJob.groupBy({ by: ['status'], _count: { _all: true } }),
@@ -104,7 +104,7 @@ router.get('/overview', async (_req, res) => {
       .filter(job => ['failed', 'manual_review', 'detected', 'editorial_review', 'researching', 'writing', 'revising', 'quality_review', 'analyzed', 'written', 'rendered', 'ignored'].includes(job.status))
       .slice(0, 8)
       .map(job => ({ id: job.id, status: job.status, reason: dashboardJobNote(job), source: job.source?.displayName || job.source?.handle || '未知来源', postId: job.post?.postId || '', updatedAt: job.updatedAt }));
-    const safeJobs = jobs.map(job => ({ ...job, note: dashboardJobNote(job), review: job.editorialReviews?.[0] || job.metadata?.review || null }));
+    const safeJobs = jobs.map(job => ({ ...job, note: dashboardJobNote(job), review: job.editorialReviews?.[0] || null }));
     const safePolls = polls.map(poll => ({
       id: poll.id,
       outcome: poll.outcome,
