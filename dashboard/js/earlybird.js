@@ -86,12 +86,8 @@
   function renderActivity(data) {
     const researchDetail = review => {
       if (!review) return '';
-      const plan = review.output?.researchPlan || {};
-      const xCount = plan.xQueries?.length || 0;
-      const webCount = plan.webQueries?.length || 0;
-      const selected = review.output?.selectedResearchUrls?.length || 0;
       const action = review.decision === 'merge' ? '合稿' : review.decision === 'pass' ? '通过' : review.decision === 'rewrite' ? '改写' : '人工审核';
-      const research = xCount || webCount || selected ? ` · X ${xCount} 条、网页 ${webCount} 条、选证据 ${selected} 条` : '';
+      const research = review.phase === 'research_coordination' ? ' · 已主动补证据' : '';
       return `总编${action} · ${review.qualityScore ?? '—'} 分${research}`;
     };
     const jobs = data.jobs.map(job => ({ type: '任务', title: `${statusLabels[job.status] || job.status} · ${job.source?.displayName || job.source?.handle || '未知来源'}`, detail: researchDetail(job.review) || job.note || '正在推进。', time: job.updatedAt }));
