@@ -278,6 +278,12 @@ describe('independent editorial review', () => {
     expect(decision.researchPlan.webQueries[0].scope).toBe('official');
   });
 
+  it('normalizes compatible-model five-point quality grades to the 100-point scale', () => {
+    const decision = normalizeEditorialDecision({ decision: 'pass', contentType: 'brief', qualityScore: 5, issues: [] }, { job, candidates: [], phase: 'draft' });
+    expect(decision.qualityScore).toBe(100);
+    expect(decision.decision).toBe('pass');
+  });
+
   it('keeps editor and draft review decisions separate', async () => {
     const client = { complete: vi.fn()
       .mockResolvedValueOnce({ decision: 'merge', contentType: 'event', qualityScore: 91, relatedJobIds: ['j-related'], visualPlan: [] })
