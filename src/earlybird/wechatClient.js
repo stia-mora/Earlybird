@@ -1,4 +1,24 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const WECHAT_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png']);
+
+export async function prepareWechatUpload(filePath, { run = execFileAsync, tempRoot = process.env.TMPDIR || process.env.TEMP || '/tmp' } = {}) {
+  const extension = extname(filePath).toLowerCase();
+  if (WECHAT_IMAGE_EXTENSIONS.has(extension)) return { path: filePath, cleanup: async () => {} };
+  const directory = await mkdtemp(join(tempRoot, 'earlybird-wechat-'));
+  const outputPath = join(directory, 'image.jpg');
+  try {
+    await run(process.env.FFMPEG_PATH || 'ffmpeg', ['-y', '-i', filePath, '-frames:v', '1', '-q:v', '2', outputPath], { windowsHide: true });
+    return { path: outputPath, cleanup: () => rm(directory, { recursive: true, force: true }) };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw new Error(`WeChat requires JPG/PNG image uploads; conversion failed for ${filePath}: ${error.message}`);
+  }
+}
 
 export function createWeChatClient({ appId = process.env.WECHAT_APP_ID, appSecret = process.env.WECHAT_APP_SECRET, fetchImpl = globalThis.fetch, apiBase = 'https://api.weixin.qq.com' } = {}) {
   let token = null;
@@ -20,13 +40,18 @@ export function createWeChatClient({ appId = process.env.WECHAT_APP_ID, appSecre
     return data;
   }
   async function upload(path, filePath, extra = {}) {
+    const prepared = await prepareWechatUpload(filePath);
     const form = new FormData();
-    form.append('media', new Blob([await readFile(filePath)]), filePath.split(/[\\/]/).pop());
-    for (const [key, value] of Object.entries(extra)) form.append(key, value);
-    const response = await fetchImpl(`${apiBase}${path}?access_token=${encodeURIComponent(await accessToken())}`, { method: 'POST', body: form });
-    const data = await response.json();
-    if (!response.ok || data.errcode) throw new Error(`WeChat upload error ${data.errcode || response.status}: ${data.errmsg || response.statusText}`);
-    return data;
+    try {
+      form.append('media', new Blob([await readFile(prepared.path)]), prepared.path.split(/[\\/]/).pop());
+      for (const [key, value] of Object.entries(extra)) form.append(key, value);
+      const response = await fetchImpl(`${apiBase}${path}?access_token=${encodeURIComponent(await accessToken())}`, { method: 'POST', body: form });
+      const data = await response.json();
+      if (!response.ok || data.errcode) throw new Error(`WeChat upload error ${data.errcode || response.status}: ${data.errmsg || response.statusText}`);
+      return data;
+    } finally {
+      await prepared.cleanup();
+    }
   }
   return {
     accessToken,

@@ -9,7 +9,7 @@ import { analyzePost, createMultimodalClient } from '../src/earlybird/aiPipeline
 import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { assertGzhTypography, renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
-import { createWeChatClient } from '../src/earlybird/wechatClient.js';
+import { createWeChatClient, prepareWechatUpload } from '../src/earlybird/wechatClient.js';
 import { comparePosts, DEFAULT_SOURCES, fullWidthPunctuation } from '../src/earlybird/utils.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline, replaceManagedDrafts } from '../src/earlybird/pipeline.js';
@@ -688,6 +688,17 @@ describe('editorial article pipeline', () => {
 });
 
 describe('WeChat client', () => {
+  it('converts non-JPG/PNG media before a WeChat image upload', async () => {
+    const calls = [];
+    const prepared = await prepareWechatUpload('source.webp', {
+      tempRoot: await mkdtemp(join(tmpdir(), 'earlybird-wechat-upload-')),
+      run: vi.fn(async (command, args) => { calls.push({ command, args }); }),
+    });
+    expect(calls[0]).toMatchObject({ command: 'ffmpeg', args: expect.arrayContaining(['-i', 'source.webp', '-frames:v', '1']) });
+    expect(prepared.path).toMatch(/image\.jpg$/);
+    await prepared.cleanup();
+  });
+
   it('caches access tokens and verifies draft calls', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, options = {}) => {
