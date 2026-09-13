@@ -828,7 +828,7 @@ function draftPipelineFixture(coverImageGenerator) {
     deleteDraft: vi.fn(async () => ({})),
   };
   const reviewer = {
-    triage: vi.fn(async () => ({ decision: 'pass', contentType: 'brief', qualityScore: 92, issues: [], rewriteInstructions: '', relatedJobIds: [], visualPlan: [] })),
+    triage: vi.fn(async () => ({ decision: 'rewrite', contentType: 'brief', qualityScore: 76, issues: ['需要按事实钩子重写'], rewriteInstructions: '保留官方事实，重写开篇和段落节奏。', relatedJobIds: [], visualPlan: [] })),
     reviewDraft: vi.fn(async () => ({ decision: 'pass', contentType: 'brief', qualityScore: 92, issues: [], rewriteInstructions: '', relatedJobIds: [], visualPlan: [] })),
   };
   return {

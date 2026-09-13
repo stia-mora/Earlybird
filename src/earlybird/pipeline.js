@@ -233,7 +233,8 @@ export function createArticlePipeline({
           metadata = metadataWithReview({ ...metadata, editorialResearch: research }, triage, triage);
           await saveReview(prisma, job, 'research_coordination', 1, triage, JSON.stringify(research));
         }
-        if (triage.decision !== 'pass' && triage.decision !== 'merge') return manualReview(job, metadata, triage.issues.join('；') || '总编辑要求人工审核');
+        if (triage.decision === 'manual_review') return manualReview(job, metadata, triage.issues.join('；') || '总编辑要求人工审核');
+        if (!['pass', 'rewrite', 'merge'].includes(triage.decision)) return manualReview(job, metadata, triage.issues.join('；') || '总编辑返回了无法执行的审核决定');
 
         const relatedJobs = candidates.filter(item => triage.relatedJobIds.includes(item.id));
         const storyJobs = [job, ...relatedJobs];
