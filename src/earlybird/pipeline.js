@@ -15,6 +15,7 @@ import { collectTavilyImages, createTavilyImageSearch } from './tavilyImageSearc
 import { contentStandard, createEditorialOrchestrator, reviewInputHash } from './editorialReview.js';
 import { emptyEditorialResearch, gatherEditorialResearch, hasResearchPlan, selectEditorialResearch } from './editorialResearch.js';
 import { createEditorialXSearch } from './xResearchSearch.js';
+import { sanitizeJsonUnicode } from './utils.js';
 
 const MAX_REWRITE_ATTEMPTS = 3;
 
@@ -93,11 +94,11 @@ async function capturePostEvidence({ evidence, post, assets, outputPath, thread,
 }
 
 function metadataWithReview(metadata, editorial, review) {
-  return {
+  return sanitizeJsonUnicode({
     ...metadata,
     editorial: { ...editorial, decision: review.decision, qualityScore: review.qualityScore, issues: review.issues, relatedJobIds: review.relatedJobIds, selectedResearchUrls: review.selectedResearchUrls, researchPlan: review.researchPlan, visualPlan: review.visualPlan },
     review: { decision: review.decision, qualityScore: review.qualityScore, issues: review.issues, rewriteInstructions: review.rewriteInstructions, at: new Date().toISOString() },
-  };
+  });
 }
 
 function externalStoryPost(evidence) {
@@ -118,10 +119,11 @@ function externalStoryJob(evidence) {
 }
 
 async function saveReview(prisma, job, phase, attempt, decision, input) {
+  const safeDecision = sanitizeJsonUnicode(decision);
   const data = {
-    jobId: job.id, phase, attempt, decision: decision.decision, contentType: decision.contentType,
-    qualityScore: decision.qualityScore, issues: decision.issues, rewriteInstructions: decision.rewriteInstructions || null,
-    visualPlan: decision.visualPlan, relatedJobIds: decision.relatedJobIds, inputHash: reviewInputHash(input), output: decision,
+    jobId: job.id, phase, attempt, decision: safeDecision.decision, contentType: safeDecision.contentType,
+    qualityScore: safeDecision.qualityScore, issues: safeDecision.issues, rewriteInstructions: safeDecision.rewriteInstructions || null,
+    visualPlan: safeDecision.visualPlan, relatedJobIds: safeDecision.relatedJobIds, inputHash: reviewInputHash(input), output: safeDecision,
   };
   return prisma?.earlyBirdEditorialReview?.create ? prisma.earlyBirdEditorialReview.create({ data }) : data;
 }

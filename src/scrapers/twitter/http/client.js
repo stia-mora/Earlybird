@@ -74,6 +74,7 @@ export class TwitterHttpClient {
    * @param {string} [options.proxy] - Proxy URL (http(s)://, socks5://)
    * @param {'wait'|'error'|object} [options.rateLimitStrategy='error']
    * @param {number} [options.maxRetries=3]
+   * @param {number} [options.requestTimeoutMs=0] - Per-request timeout; zero disables it
    * @param {string|'rotate'} [options.userAgent]
    * @param {function} [options.fetch] - Custom fetch implementation
    * @param {function} [options.onResponse] - Called after every HTTP response with
@@ -96,6 +97,7 @@ export class TwitterHttpClient {
     this._cookies = {};
     this._proxy = options.proxy || null;
     this._maxRetries = options.maxRetries ?? 3;
+    this._requestTimeoutMs = Math.max(0, Number(options.requestTimeoutMs) || 0);
     this._fetch = options.fetch || globalThis.fetch;
     this._onResponse = typeof options.onResponse === 'function' ? options.onResponse : null;
     this._proxyDispatcher = null;
@@ -158,16 +160,13 @@ export class TwitterHttpClient {
     this._proxyDispatcher = null;
   }
 
-  /**
-   * Build (once) the undici ProxyAgent that routes this client's requests
-   * through `options.proxy`. Node's global fetch honours the `dispatcher`
-   * request option, so no fetch wrapper is needed. A custom `options.fetch`
-   * is left alone: it owns its own transport.
-   * @private
-   */
-  async _requestInit(method, headers, body) {
-    const init = { method, headers, body };
-    if (!this._proxy || this._fetch !== globalThis.fetch) return init;
+  async _transportInit(init = {}) {
+    const request = { ...init };
+    if (this._requestTimeoutMs) {
+      const timeout = AbortSignal.timeout(this._requestTimeoutMs);
+      request.signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
+    }
+    if (!this._proxy || this._fetch !== globalThis.fetch || request.dispatcher) return request;
     if (!this._proxyDispatcher) {
       let undici;
       try {
@@ -180,8 +179,20 @@ export class TwitterHttpClient {
       }
       this._proxyDispatcher = new undici.ProxyAgent(this._proxy);
     }
-    init.dispatcher = this._proxyDispatcher;
-    return init;
+    request.dispatcher = this._proxyDispatcher;
+    return request;
+  }
+
+  /**
+   * Fetch through this client's configured proxy and timeout settings.
+   * Authentication and query-ID refreshes use the same route as GraphQL calls.
+   */
+  async fetch(url, init = {}) {
+    return this._fetch(url, await this._transportInit(init));
+  }
+
+  async _requestInit(method, headers, body) {
+    return { method, headers, body };
   }
 
   // ---- Header construction ------------------------------------------------
@@ -231,7 +242,7 @@ export class TwitterHttpClient {
     if (!isTransactionIdEnabled({ enabled: this._transactionId })) return;
     const id = await getTransactionId(method, url, {
       enabled: this._transactionId,
-      fetch: this._fetch,
+      fetch: this.fetch.bind(this),
     });
     if (id) {
       headers['x-client-transaction-id'] = id;
@@ -272,7 +283,7 @@ export class TwitterHttpClient {
         // second, and x.com's web client never replays one. A caller that
         // supplied its own header keeps it.
         if (!callerSigned) await this._signRequest(method, url, headers);
-        const res = await this._fetch(url, await this._requestInit(method, headers, body));
+        const res = await this.fetch(url, await this._requestInit(method, headers, body));
         const elapsed = Date.now() - startTime;
         if (this._debug) {
           console.log(`[TwitterHttpClient] ${method} ${url} → ${res.status} (${elapsed}ms)`);
@@ -364,7 +375,7 @@ export class TwitterHttpClient {
     const resolvedId = resolved.source === 'cache' ? resolved.queryId : queryId;
 
     if (this._autoRefreshQueryIds) {
-      maybeRefreshInBackground({ fetch: this._fetch });
+      maybeRefreshInBackground({ fetch: this.fetch.bind(this) });
     }
 
     try {
@@ -426,7 +437,7 @@ export class TwitterHttpClient {
    */
   async _refreshedQueryId(operationName) {
     try {
-      await refreshQueryIds({ fetch: this._fetch });
+      await refreshQueryIds({ fetch: this.fetch.bind(this) });
     } catch (err) {
       if (this._debug) {
         console.log(`[TwitterHttpClient] query ID refresh failed: ${err.message}`);

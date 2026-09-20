@@ -48,6 +48,37 @@ export function jsonParse(value, fallback = null) {
   try { return JSON.parse(value); } catch { return fallback; }
 }
 
+export function sanitizeUnicode(value) {
+  const text = String(value ?? '');
+  let result = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        result += text[index] + text[index + 1];
+        index += 1;
+      } else {
+        result += '\uFFFD';
+      }
+    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+      result += '\uFFFD';
+    } else {
+      result += text[index];
+    }
+  }
+  return result;
+}
+
+export function sanitizeJsonUnicode(value) {
+  if (typeof value === 'string') return sanitizeUnicode(value);
+  if (Array.isArray(value)) return value.map(sanitizeJsonUnicode);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeJsonUnicode(item)]));
+  }
+  return value;
+}
+
 export function fullWidthPunctuation(text) {
   const value = String(text || '');
   const replacements = { ',': '，', '.': '。', '!': '！', '?': '？', ':': '：', ';': '；', '(': '（', ')': '）', '"': '“', "'": '’' };

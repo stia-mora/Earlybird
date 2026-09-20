@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { articleVisualAssets, editorialStructureIssues, markdownBodyLength } from './articleWriter.js';
 import { normalizeResearchPlan } from './editorialResearch.js';
+import { sanitizeUnicode } from './utils.js';
 
 export const ARTICLE_STANDARDS = {
   brief: { minBody: 350, maxBody: 700, minVisuals: 1, minHeadings: 0 },
@@ -12,7 +13,7 @@ const DECISIONS = new Set(['pass', 'rewrite', 'merge', 'manual_review']);
 const CONTENT_TYPES = new Set(Object.keys(ARTICLE_STANDARDS));
 
 function compact(value, maximum = 500) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  const text = sanitizeUnicode(value || '').replace(/\s+/g, ' ').trim();
   return text.slice(0, maximum);
 }
 

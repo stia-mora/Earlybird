@@ -156,11 +156,8 @@ export async function defaultScraperFactory() {
   return createHttpScraper({
     cookies: await configuredXCookies(),
     proxy: process.env.EARLYBIRD_X_PROXY || undefined,
+    requestTimeoutMs,
     rateLimitStrategy: 'error',
     maxRetries: Number(process.env.EARLYBIRD_X_MAX_RETRIES || 1),
-    fetch: (url, options = {}) => fetch(url, {
-      ...options,
-      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs),
-    }),
   });
 }

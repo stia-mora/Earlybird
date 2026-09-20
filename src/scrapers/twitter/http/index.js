@@ -68,7 +68,7 @@ export async function createHttpScraper(options = {}) {
   if (options.cookies) {
     // Keep session validation on the same transport as GraphQL requests so
     // proxy routing and request timeouts also apply during cookie login.
-    const auth = new TwitterAuth({ fetch: client._fetch });
+    const auth = new TwitterAuth({ fetch: client.fetch.bind(client) });
     await auth.loginWithCookies(options.cookies);
   }
 

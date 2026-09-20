@@ -255,6 +255,15 @@ describe('Proxy URL parsing', () => {
     client.setProxy('socks5://new:1080');
     expect(client._proxy).toBe('socks5://new:1080');
   });
+
+  it('applies a configured timeout to requests', async () => {
+    const fetch = mockFetch(200, { ok: true });
+    const client = new TwitterHttpClient({ fetch, maxRetries: 0, requestTimeoutMs: 5000 });
+
+    await client.request('https://x.com/test');
+
+    expect(fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ import { assembleThread } from '../src/earlybird/threadAssembler.js';
 import { humanize, scoreHumanized } from '../src/earlybird/humanizer.js';
 import { assertGzhTypography, renderGzhMarkdown, validateGzhHtml } from '../src/earlybird/gzhRenderer.js';
 import { createWeChatClient, prepareWechatUpload } from '../src/earlybird/wechatClient.js';
-import { comparePosts, DEFAULT_SOURCES, fullWidthPunctuation } from '../src/earlybird/utils.js';
+import { comparePosts, DEFAULT_SOURCES, fullWidthPunctuation, sanitizeJsonUnicode } from '../src/earlybird/utils.js';
 import { assertTweetEvidence, xBrowserCookies } from '../src/earlybird/evidenceCapture.js';
 import { createArticlePipeline, replaceManagedDrafts } from '../src/earlybird/pipeline.js';
 import { articleVisualAssets, compactEditorialMarkdown, createArticleWriter, editorialStructureIssues, hasCompactPresentation, markdownBodyLength, markdownHeadingCount, MAX_PARAGRAPH_LENGTH, sanitizeEditorialMarkdown, varyEditorialParagraphs } from '../src/earlybird/articleWriter.js';
@@ -296,6 +296,17 @@ describe('independent editorial review', () => {
     expect(draft).toMatchObject({ decision: 'pass', qualityScore: 94 });
     expect(client.complete.mock.calls[0][0].system).toContain('总编辑');
     expect(client.complete.mock.calls[1][0].system).toContain('独立于写作 Agent');
+  });
+
+  it('removes malformed Unicode from editorial JSON while preserving valid emoji', () => {
+    const decision = normalizeEditorialDecision({
+      decision: 'pass', contentType: 'brief', qualityScore: 90,
+      visualPlan: [{ query: `model demo \uD83D`, purpose: '说明能力', altText: '演示' }],
+    }, { job, candidates: [] });
+
+    expect(decision.visualPlan[0].query).toBe('model demo �');
+    expect(sanitizeJsonUnicode({ nested: ['valid 😀', 'broken \uDC00'] })).toEqual({ nested: ['valid 😀', 'broken �'] });
+    expect(JSON.stringify(decision)).not.toContain('\\ud83d');
   });
 
   it('flags a draft with insufficient body, images, or sources before model approval', () => {
