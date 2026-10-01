@@ -84,6 +84,9 @@ Thumbs.db
 *.pyo
 *.pyd
 
+# MkDocs output; documentation sources are in docs/
+/site/
+
 # Distribution
 dist/
 build/
