@@ -53,5 +53,7 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, '0.0.0.0', () => console.log(`EarlyBird Hermes relay listening on ${port}`));
-process.on('SIGTERM', () => server.close(() => process.exit(0)));
+const shutdown = () => server.close(() => process.exit(0));
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+

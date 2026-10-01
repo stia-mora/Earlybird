@@ -209,6 +209,15 @@ describe('EarlyBird source timing', () => {
     expect(startupPollDelay(source, { index: 0, total: 10, now: Date.parse('2026-09-05T08:55:00.000Z'), random: () => 0 })).toBe(300000);
     expect(startupPollDelay(source, { index: 9, total: 10, now: Date.parse('2026-09-05T08:55:00.000Z'), random: () => 0.5 })).toBe(585000);
   });
+
+  it('calculates startup poll delay when lastPolledAt is a Date instance or ISO string', () => {
+    const now = 1700000000000;
+    const dateSource = { pollIntervalSeconds: 300, lastPolledAt: new Date(now - 100000) };
+    const strSource = { pollIntervalSeconds: 300, lastPolledAt: new Date(now - 100000).toISOString() };
+    const expected = (300 * 1000) - 100000;
+    expect(startupPollDelay(dateSource, { index: 0, total: 1, now, random: () => 0 })).toBe(expected);
+    expect(startupPollDelay(strSource, { index: 0, total: 1, now, random: () => 0 })).toBe(expected);
+  });
 });
 
 describe('EarlyBird job recovery', () => {

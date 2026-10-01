@@ -1,8 +1,8 @@
 /* Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0. */
 (function () {
   'use strict';
-
-  const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001/api' : '/api';
+  const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const API_BASE = isLocal && window.location.port !== '3001' ? `${window.location.protocol}//${window.location.hostname}:3001/api` : '/api';
   const statusLabels = { detected: '等待编辑批次', editorial_review: '总编辑审核', researching: '主动补证据', writing: '写作中', revising: '定向改写', quality_review: '质量审核', manual_review: '人工审核', verified: '已验证', merged: '已并入主稿', rendered: '已排版', failed: '失败', ignored: '已忽略' };
   const pipelineSteps = [
     ['detected', '等待编辑批次', 'blue'],

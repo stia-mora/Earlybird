@@ -113,20 +113,26 @@ monitorQueue.process('poll', Number(process.env.EARLYBIRD_SOURCE_CONCURRENCY || 
   }
 });
 
-async function scheduleSources() {
+async function scheduleSources({ cleanStale = false } = {}) {
   const sources = await prisma.earlyBirdSource.findMany({ where: { enabled: true } });
-  const active = new Set();
+  const pendingOrActive = new Set();
   for (const job of await monitorQueue.getJobs(['waiting', 'delayed', 'active'])) {
     if (job.name !== 'poll' || !job.data?.sourceId) continue;
-    if (await job.getState() === 'active') active.add(job.data.sourceId);
-    else await job.remove();
+    const state = await job.getState();
+    if (state === 'active') {
+      pendingOrActive.add(job.data.sourceId);
+    } else if (cleanStale) {
+      await job.remove();
+    } else {
+      pendingOrActive.add(job.data.sourceId);
+    }
   }
   for (const [index, source] of sources.entries()) {
-    if (active.has(source.id)) continue;
+    if (pendingOrActive.has(source.id)) continue;
     await enqueueSourcePoll(source, startupPollDelay(source, { index, total: sources.length }));
   }
 }
-await scheduleSources();
+await scheduleSources({ cleanStale: true });
 const recoveredJobs = await enqueueInterruptedJobs({ prisma, queue });
 if (recoveredJobs) console.warn(`EarlyBird recovered ${recoveredJobs} interrupted article job(s)`);
 const legacyEditorialJobs = await enqueueLegacyEditorialJobs({ prisma, queue });
@@ -137,6 +143,19 @@ const dailySummaryTask = cron.schedule(process.env.EARLYBIRD_DAILY_SUMMARY_CRON 
 const editorialReviewTask = cron.schedule(process.env.EARLYBIRD_DAILY_EDITORIAL_REVIEW_CRON || '0 9,17 * * *', () => {
   runDailyEditorialReview().catch(error => console.error('EarlyBird daily editorial review failed', error.message));
 }, { timezone: 'Asia/Shanghai', noOverlap: true });
+const sourceSyncTask = cron.schedule(process.env.EARLYBIRD_SOURCE_SYNC_CRON || '*/5 * * * *', () => {
+  scheduleSources().catch(error => console.error('EarlyBird source sync failed', error.message));
+}, { noOverlap: true });
 console.log(`EarlyBird worker ready (${await prisma.earlyBirdSource.count()} sources)`);
 
-process.on('SIGTERM', async () => { dailySummaryTask.stop(); editorialReviewTask.stop(); await queue.close(); await monitorQueue.close(); await prisma.$disconnect(); process.exit(0); });
+const shutdown = async () => {
+  dailySummaryTask.stop();
+  editorialReviewTask.stop();
+  sourceSyncTask.stop();
+  await queue.close();
+  await monitorQueue.close();
+  await prisma.$disconnect();
+  process.exit(0);
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

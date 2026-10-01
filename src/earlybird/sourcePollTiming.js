@@ -14,7 +14,7 @@ export function startupPollDelay(source, { index = 0, total = 1, now = Date.now(
   const offset = index * slot + Math.floor(random() * slot);
   const resetAt = rateLimitResetAt(source);
   if (resetAt && resetAt > now) return resetAt - now + offset;
-  const lastPolledAt = Date.parse(source.lastPolledAt || '');
+  const lastPolledAt = source.lastPolledAt ? new Date(source.lastPolledAt).getTime() : NaN;
   if (Number.isFinite(lastPolledAt) && lastPolledAt + interval > now) return lastPolledAt + interval - now;
   return Math.max(1000, offset);
 }

@@ -43,6 +43,7 @@
     "cli": "node src/cli/index.js",
     "mcp": "node src/mcp/server.js",
     "worker": "node api/services/jobQueue.js",
+    "worker:earlybird": "node src/earlybird/worker.js",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "node prisma/seed.js",
