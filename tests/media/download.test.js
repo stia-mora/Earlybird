@@ -51,7 +51,7 @@ beforeEach(async () => {
 describe('media templates', () => {
   it('renders the default layout and X\'s own CDN name', () => {
     const it1 = item({ url: 'https://pbs.twimg.com/media/Go6lFkVWsAAQwOo.jpg?format=jpg&name=orig' });
-    expect(renderTemplate('{username}/{tweet_id}_{num}.{ext}', it1)).toBe('nichxbt/1234567890_1.jpg');
+    expect(renderTemplate('{username}/{tweet_id}_{num}.{ext}', it1)).toBe(join('nichxbt', '1234567890_1.jpg'));
     // gallery-dl cannot do this one (mikf/gallery-dl#7695).
     expect(renderTemplate('{date}_{media_filename}.{ext}', it1)).toBe('2026-08-28_Go6lFkVWsAAQwOo.jpg');
     expect(cdnBasename(it1.url)).toBe('Go6lFkVWsAAQwOo');
@@ -73,11 +73,11 @@ describe('media templates', () => {
     for (const username of ['../../etc/passwd', '..', '/absolute', 'a/b/../..']) {
       const rendered = renderTemplate('{username}.{ext}', item({ url: 'https://x/a.jpg', username }));
       expect(rendered.split(sep)).not.toContain('..');
-      const resolved = resolveWithin('/out', rendered);
-      expect(resolved.startsWith(`/out${sep}`)).toBe(true);
+      const resolved = resolveWithin(outputDir, rendered);
+      expect(resolved.startsWith(`${outputDir}${sep}`)).toBe(true);
     }
-    expect(() => resolveWithin('/out', '../escape.jpg')).toThrow(/Refusing to write outside/);
-    expect(() => resolveWithin('/out', `..${sep}..${sep}etc${sep}passwd`)).toThrow(/Refusing to write outside/);
+    expect(() => resolveWithin(outputDir, '../escape.jpg')).toThrow(/Refusing to write outside/);
+    expect(() => resolveWithin(outputDir, `..${sep}..${sep}etc${sep}passwd`)).toThrow(/Refusing to write outside/);
   });
 });
 

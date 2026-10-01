@@ -25,11 +25,11 @@ import {
 
 const CLI = fileURLToPath(new URL('../../src/cli/index.js', import.meta.url));
 
-/** Run the real binary with HOME and cwd pointed at a temp directory. */
+/** Run the real binary with its user home and cwd pointed at a temp directory. */
 function cli(args, dir) {
   return execFileSync(process.execPath, [CLI, ...args], {
     cwd: dir,
-    env: { ...process.env, HOME: dir, FORCE_COLOR: '0' },
+    env: { ...process.env, HOME: dir, USERPROFILE: dir, FORCE_COLOR: '0' },
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -101,12 +101,12 @@ describe('skills', () => {
     const scope = { home: '/h', cwd: '/p' };
 
     it('maps each target to its directory', () => {
-      expect(destinationFor('claude', skill, { ...scope, global: true }).path).toBe('/h/.claude/skills/demo');
-      expect(destinationFor('claude', skill, scope).path).toBe('/p/.claude/skills/demo');
-      expect(destinationFor('project', skill, { ...scope, global: true }).path).toBe('/p/.claude/skills/demo');
-      expect(destinationFor('codex', skill, { ...scope, global: true }).path).toBe('/h/.codex/skills/demo');
-      expect(destinationFor('cursor', skill, { ...scope, global: true }).path).toBe('/p/.cursor/rules/demo.mdc');
-      expect(destinationFor('windsurf', skill, scope).path).toBe('/p/.windsurf/rules/demo.md');
+      expect(destinationFor('claude', skill, { ...scope, global: true }).path).toBe(path.join(scope.home, '.claude', 'skills', 'demo'));
+      expect(destinationFor('claude', skill, scope).path).toBe(path.join(scope.cwd, '.claude', 'skills', 'demo'));
+      expect(destinationFor('project', skill, { ...scope, global: true }).path).toBe(path.join(scope.cwd, '.claude', 'skills', 'demo'));
+      expect(destinationFor('codex', skill, { ...scope, global: true }).path).toBe(path.join(scope.home, '.codex', 'skills', 'demo'));
+      expect(destinationFor('cursor', skill, { ...scope, global: true }).path).toBe(path.join(scope.cwd, '.cursor', 'rules', 'demo.mdc'));
+      expect(destinationFor('windsurf', skill, scope).path).toBe(path.join(scope.cwd, '.windsurf', 'rules', 'demo.md'));
     });
 
     it('rejects an unknown target with the list of valid ones', () => {
@@ -200,7 +200,7 @@ describe('skills', () => {
     it('installs into a temp HOME and then lists it as installed', async () => {
       const out = JSON.parse(cli(['skills', 'install', 'account-backup', '--global', '--json'], dir));
       expect(out).toEqual([
-        expect.objectContaining({ skill: 'account-backup', target: 'claude', action: 'installed' }),
+        expect.objectContaining({ skill: 'account-backup', target: 'claude', action: 'installed', path: path.join(dir, '.claude', 'skills', 'account-backup') }),
       ]);
       await fs.access(path.join(dir, '.claude', 'skills', 'account-backup', 'SKILL.md'));
 

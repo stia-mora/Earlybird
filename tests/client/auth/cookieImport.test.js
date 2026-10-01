@@ -210,17 +210,26 @@ describe('parseCookieInput: errors', () => {
 
 describe('readBrowserCookies', () => {
   let home;
-  let origHome;
+  let originalEnv;
 
   beforeEach(() => {
     home = path.join(tmpdir(), `xactions-home-${randomUUID()}`);
     fs.mkdirSync(home, { recursive: true });
-    origHome = process.env.HOME;
-    process.env.HOME = home;
+    const testEnv = {
+      HOME: home,
+      USERPROFILE: home,
+      APPDATA: path.join(home, 'AppData', 'Roaming'),
+      LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+    };
+    originalEnv = Object.fromEntries(Object.keys(testEnv).map(key => [key, process.env[key]]));
+    Object.assign(process.env, testEnv);
   });
 
   afterEach(() => {
-    process.env.HOME = origHome;
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     fs.rmSync(home, { recursive: true, force: true });
   });
 
@@ -237,10 +246,13 @@ describe('readBrowserCookies', () => {
   });
 
   it('reads a Firefox cookies.sqlite (plaintext values)', () => {
-    const profile = path.join(home, '.mozilla/firefox/abcd.default-release');
+    let firefoxRoot = path.join(home, '.mozilla', 'firefox');
+    if (process.platform === 'win32') firefoxRoot = path.join(process.env.APPDATA, 'Mozilla', 'Firefox');
+    else if (process.platform === 'darwin') firefoxRoot = path.join(home, 'Library', 'Application Support', 'Firefox');
+    const profile = path.join(firefoxRoot, 'abcd.default-release');
     fs.mkdirSync(profile, { recursive: true });
     fs.writeFileSync(
-      path.join(home, '.mozilla/firefox/profiles.ini'),
+      path.join(firefoxRoot, 'profiles.ini'),
       '[Profile0]\nName=default\nIsRelative=1\nPath=abcd.default-release\nDefault=1\n',
     );
 
