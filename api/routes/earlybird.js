@@ -21,10 +21,6 @@ async function enqueueArticleProcess(jobId, options = {}) {
   const existing = await queue.getJob(queueJobId);
   if (existing) {
     const state = await existing.getState();
-    if (state === 'failed') {
-      await existing.retry();
-      return;
-    }
     if (['active', 'waiting', 'delayed', 'paused'].includes(state)) return;
     await existing.remove();
   }

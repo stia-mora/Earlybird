@@ -332,7 +332,9 @@ export function createArticlePipeline({
         }
         const manualVideos = allAssets.filter(item => item.kind === 'video' && item.localPath);
         for (const asset of manualVideos) await prisma.earlyBirdAsset.update({ where: { id: asset.id }, data: { wechatMediaId: null, status: 'manual_upload_required' } });
-        const markdownForRender = [...assetUrls.entries()].reduce((value, [localPath, url]) => value.replaceAll(localPath, url), article.markdown);
+        const markdownForRender = [...assetUrls.entries()].reduce((value, [localPath, url]) => {
+          return value.replaceAll(localPath, url).replaceAll(localPath.replace(/\\/g, '/'), url);
+        }, article.markdown);
         const renderedEndVisuals = endVisuals.map(asset => ({ ...asset, src: assetUrls.get(asset.localPath) || asset.localPath }));
         metadata = { ...metadata, cover: cover || { status: 'source-fallback', reason: 'cover image generation failed' } };
         const html = await renderGzhMarkdown(markdownForRender, { title: article.title, digest: article.digest, contentType: editorial.contentType, references, endVisuals: renderedEndVisuals, imageAttributions: imageAttributions(visualAssets, assetUrls) });

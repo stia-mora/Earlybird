@@ -87,7 +87,11 @@ async function runDailyEditorialReview() {
     orderBy: { detectedAt: 'asc' },
   });
   for (const job of jobs) {
-    await pipeline.process(job.id, { force: true, dailyReview: true });
+    try {
+      await pipeline.process(job.id, { force: true, dailyReview: true });
+    } catch (error) {
+      console.error(`EarlyBird daily editorial review failed for job ${job.id}:`, error.message);
+    }
   }
   console.log(`EarlyBird daily editorial review processed ${jobs.length} job(s)`);
   return jobs.length;

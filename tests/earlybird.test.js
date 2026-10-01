@@ -912,4 +912,34 @@ describe('cover image pipeline integration', () => {
       else process.env.EARLYBIRD_THREAD_WAIT_MS = originalWait;
     }
   });
+
+  describe('code review bug fixes', () => {
+    it('renders code blocks in markdown without throwing TypeError', async () => {
+      const markdown = '前文说明。\n\n```python\nprint("Hello World")\n```\n\n后文继续分析。';
+      const html = await renderGzhMarkdown(markdown, { title: '代码示例', digest: '代码分析' });
+      expect(html).toContain('print(&quot;Hello World&quot;)');
+      expect(html).toContain('background:#27272A');
+    });
+
+    it('renders level 4 headings cleanly without raw hashes leaking', async () => {
+      const markdown = '## 主标题\n\n#### 子标题\n\n详细说明文字。';
+      const html = await renderGzhMarkdown(markdown, { title: '测试标题', digest: '测试摘要' });
+      expect(html).not.toContain('####');
+      expect(html).toContain('子标题');
+    });
+
+    it('pairs Chinese quotation marks correctly for double and single quotes', () => {
+      expect(fullWidthPunctuation('"测试内容"发布了"新模型"')).toBe('“测试内容”发布了“新模型”');
+      expect(fullWidthPunctuation('\'核心能力\'')).toBe('‘核心能力’');
+      expect(fullWidthPunctuation('English text "quoted" and don\'t change.')).toBe('English text "quoted" and don\'t change.');
+    });
+
+    it('matches Windows backslash asset paths against forward slash markdown paths', () => {
+      const visualAssets = [{ localPath: 'data\\earlybird\\media\\test.jpg', kind: 'image', sourceUrl: 'https://x.com/img' }];
+      const markdown = `这是第一段内容，详细说明技术更新的来龙去脉与具体影响。${'这是正文文字。'.repeat(30)}\n\n![测试图片](data/earlybird/media/test.jpg)`;
+      const issues = editorialStructureIssues(markdown, 'brief', visualAssets);
+      expect(issues.some(issue => issue.includes('真实素材图片'))).toBe(false);
+    });
+  });
 });
+

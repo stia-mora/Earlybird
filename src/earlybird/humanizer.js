@@ -13,7 +13,7 @@ export function scoreHumanized(markdown) {
   const penalties = [/值得注意的是/g, /综上所述/g, /不仅[^。]{0,40}而且/g, /总而言之/g, /在当今/g, /赋能/g, /生态/g];
   for (const pattern of penalties) score -= Math.min(2, (text.match(pattern) || []).length);
   if (text.length < 180) score -= 3;
-  if ((text.match(/\n## /g) || []).length > 8) score -= 2;
+  if ((text.match(/(?:^|\n)## /g) || []).length > 8) score -= 2;
   return Math.max(0, Math.min(50, score));
 }
 
@@ -35,6 +35,7 @@ export async function humanize({ client, markdown, context = {}, rulesText } = {
       && hasCompactPresentation(candidate)
       && markdownBodyLength(candidate) >= Math.floor(originalLength * 0.75)
       && markdownHeadingCount(candidate) >= originalHeadings
+      && (contentType !== 'brief' || markdownHeadingCount(candidate) === 0)
       && markdownImagePaths(candidate).length >= originalImages;
     if (preservesDensity) current = candidate;
     score = preservesDensity ? (Number(result?.score) || scoreHumanized(current)) : scoreHumanized(current);

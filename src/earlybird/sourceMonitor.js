@@ -118,7 +118,7 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
         for (const post of fresh) {
           const record = await prisma.earlyBirdPost.upsert({
             where: { sourceId_postId: { sourceId: source.id, postId: String(post.id) } },
-            update: { rawData: post, text: post.text || '', createdAt: post.createdAt ? new Date(post.createdAt) : null, sourceUrl: `https://x.com/${source.handle}/status/${post.id}` },
+            update: { rawData: post, text: post.text || '', createdAt: post.createdAt ? new Date(post.createdAt) : null, sourceUrl: `https://x.com/${source.handle}/status/${post.id}`, mediaData: post.media || [] },
             create: { sourceId: source.id, postId: String(post.id), rootPostId: String(post.id), sourceUrl: `https://x.com/${source.handle}/status/${post.id}`, authorUsername: post.author?.username || source.handle, text: post.text || '', createdAt: post.createdAt ? new Date(post.createdAt) : null, rawData: post, mediaData: post.media || [] },
           });
           const job = await prisma.earlyBirdArticleJob.upsert({ where: { postId: record.id }, update: {}, create: { sourceId: source.id, postId: record.id, status: 'detected' } });
@@ -131,7 +131,7 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
           postIds.push(String(post.id));
         }
         const newest = ordered.at(-1);
-        if (newest && (isNewer(newest, source))) await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastSeenCreatedAt: newest.createdAt ? new Date(newest.createdAt) : null, lastSeenPostId: newest.id, lastPolledAt: now(), lastError: null } });
+        if (newest && (isNewer(newest, source))) await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastSeenCreatedAt: newest.createdAt ? new Date(newest.createdAt) : null, lastSeenPostId: newest.id ? String(newest.id) : null, lastPolledAt: now(), lastError: null } });
         else await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastPolledAt: now(), lastError: null } });
         await recordPoll(prisma, { sourceId: source.id, outcome: detected ? 'detected' : 'no_new', detectedCount: detected, postIds: postIds.length ? postIds : undefined, polledAt: now() });
         return { baseline: false, detected };

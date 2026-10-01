@@ -97,7 +97,8 @@ function normalizedTitle(value) {
 }
 
 function imageAttribution(src, imageAttributions) {
-  return (imageAttributions || []).find(item => item?.src === src) || null;
+  const norm = String(src || '').replace(/\\/g, '/');
+  return (imageAttributions || []).find(item => item?.src === src || String(item?.src || '').replace(/\\/g, '/') === norm) || null;
 }
 
 export async function renderGzhMarkdown(markdown, { title, digest, contentType, references = [], endVisuals = [], imageAttributions = [] } = {}) {
@@ -113,9 +114,17 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
   let firstContentSeen = false;
   for (const raw of lines) {
     const line = raw.trimEnd();
-    if (line.startsWith('```')) { if (inCode) { sections.push(`<section style="margin:20px 10px;padding:14px;background:#27272A;color:#FFFFFF;overflow-x:auto;"><p style="font-size:13px;line-height:1.6;margin:0;"><span leaf="">${escapeHtml(code.join('\n'))}</span></p></section>`); code = []; } inCode = !inCode; continue; }
+    if (line.startsWith('```')) {
+      if (inCode) {
+        if (!current) { current = { title: null, body: [] }; sections.push(current); }
+        current.body.push({ type: 'code', content: code.join('\n') });
+        code = [];
+      }
+      inCode = !inCode;
+      continue;
+    }
     if (inCode) { code.push(line); continue; }
-    const heading = line.match(/^#{2,3}\s+(.+)/);
+    const heading = line.match(/^#{2,6}\s+(.+)/);
     if (heading) {
       if (!firstContentSeen && normalizedTitle(heading[1]) === normalizedTitle(safeTitle)) { firstContentSeen = true; continue; }
       firstContentSeen = true;
@@ -131,15 +140,27 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
       current.body.push(line);
     }
   }
+  if (inCode && code.length) {
+    if (!current) { current = { title: null, body: [] }; sections.push(current); }
+    current.body.push({ type: 'code', content: code.join('\n') });
+  }
   let html = `<section style="${GRAPHITE}">`;
   if (safeTitle) html += `<h1 style="font-size:24px;line-height:1.4;color:#27272A;margin:24px 10px 12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(safeTitle))}</span></h1>`;
   if (displayDigest) html += `<p style="font-size:16px;color:#3F3F46;margin:0 10px 24px;border-left:3px solid #52525B;padding-left:12px;"><span leaf="">${escapeHtml(fullWidthPunctuation(displayDigest))}</span></p>`;
   let headingNumber = 0;
   let highlightBudget = contentType === 'brief' ? 2 : 5;
   sections.forEach((section, index) => {
+    if (typeof section === 'string') {
+      html += section;
+      return;
+    }
     html += `<section style="margin-top:${index ? 56 : 16}px;margin-bottom:28px;padding:0 10px;">`;
     if (section.title) { headingNumber += 1; html += `<section style="padding-bottom:14px;border-bottom:1px solid #E4E4E7;"><p style="font-size:42px;font-weight:900;color:#E4E4E7;margin:0;line-height:1;"><span leaf="">${String(headingNumber).padStart(2, '0')}</span></p><h3 style="font-size:20px;font-weight:800;color:#27272A;margin:0;line-height:1.4;"><span leaf="">${escapeHtml(fullWidthPunctuation(section.title))}</span></h3></section>`; }
-    for (const item of section.body) {
+    for (const item of (section.body || [])) {
+      if (item && typeof item === 'object' && item.type === 'code') {
+        html += `<section style="margin:20px 10px;padding:14px;background:#27272A;color:#FFFFFF;overflow-x:auto;"><p style="font-size:13px;line-height:1.6;margin:0;"><span leaf="">${escapeHtml(item.content)}</span></p></section>`;
+        continue;
+      }
       const image = item.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       if (image) {
         html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(sanitizeEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' '))}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;

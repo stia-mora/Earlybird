@@ -81,10 +81,33 @@ export function sanitizeJsonUnicode(value) {
 
 export function fullWidthPunctuation(text) {
   const value = String(text || '');
-  const replacements = { ',': '，', '.': '。', '!': '！', '?': '？', ':': '：', ';': '；', '(': '（', ')': '）', '"': '“', "'": '’' };
+  const replacements = { ',': '，', '.': '。', '!': '！', '?': '？', ':': '：', ';': '；', '(': '（', ')': '）' };
   const isChinese = character => /[\u3400-\u9FFF]/.test(character || '');
 
+  let doubleQuoteOpen = false;
+  let singleQuoteOpen = false;
+
   return [...value].map((character, index) => {
+    if (character === '"') {
+      const inChineseContext = isChinese(value[index - 1]) || isChinese(value[index + 1]);
+      if (!inChineseContext) return character;
+      if (!doubleQuoteOpen) {
+        doubleQuoteOpen = true;
+        return '“';
+      }
+      doubleQuoteOpen = false;
+      return '”';
+    }
+    if (character === "'") {
+      const inChineseContext = isChinese(value[index - 1]) || isChinese(value[index + 1]);
+      if (!inChineseContext) return character;
+      if (!singleQuoteOpen) {
+        singleQuoteOpen = true;
+        return '‘';
+      }
+      singleQuoteOpen = false;
+      return '’';
+    }
     if (!replacements[character]) return character;
     // Preserve punctuation inside English prose, URLs, contractions, and versions such as Image 2.0.
     return isChinese(value[index - 1]) || isChinese(value[index + 1]) ? replacements[character] : character;

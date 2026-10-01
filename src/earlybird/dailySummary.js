@@ -33,7 +33,12 @@ export async function buildDailySummary({ prisma, now = new Date() } = {}) {
   const [sources, posts] = await Promise.all([
     prisma.earlyBirdSource.findMany({ where: { enabled: true }, select: { id: true, handle: true } }),
     prisma.earlyBirdPost.findMany({
-      where: { createdAt: { gte: start, lt: end } },
+      where: {
+        OR: [
+          { createdAt: { gte: start, lt: end } },
+          { createdAt: null, capturedAt: { gte: start, lt: end } },
+        ],
+      },
       include: { source: { select: { id: true, handle: true } }, jobs: { include: { draft: true }, take: 1, orderBy: { updatedAt: 'desc' } } },
       orderBy: { createdAt: 'asc' },
     }),

@@ -160,8 +160,10 @@ export function articleVisualAssets(assets = []) {
   const visuals = [];
   const seen = new Set();
   const add = (asset, path, kind, caption) => {
-    if (!path || seen.has(path)) return;
-    seen.add(path);
+    if (!path) return;
+    const norm = String(path).replace(/\\/g, '/');
+    if (seen.has(norm)) return;
+    seen.add(norm);
     visuals.push({ localPath: path, sourceUrl: asset.sourceUrl, kind, caption: caption || asset.metadata?.altText || '', assetId: asset.id, metadata: asset.metadata || {} });
   };
   for (const asset of assets) {
@@ -186,13 +188,14 @@ export function editorialStructureIssues(markdown, contentType, visualAssets = [
   if (!hasCompactPresentation(markdown)) issues.push(`存在星号 Markdown 标记或超过 ${MAX_PARAGRAPH_LENGTH} 个字符的段落`);
   const requiredVisuals = REQUIRED_VISUALS[contentType] || REQUIRED_VISUALS.explainer;
   if (visualAssets.length < requiredVisuals) issues.push(`需要至少 ${requiredVisuals} 张可用正文图片`);
-  const allowedPaths = new Set(visualAssets.map(asset => asset.localPath));
-  const paths = markdownImagePaths(markdown);
+  const normalizePath = path => String(path || '').replace(/\\/g, '/');
+  const allowedPaths = new Set(visualAssets.map(asset => normalizePath(asset.localPath)));
+  const paths = markdownImagePaths(markdown).map(normalizePath);
   if (paths.filter(path => allowedPaths.has(path)).length < requiredVisuals) issues.push(`需要插入至少 ${requiredVisuals} 张真实素材图片`);
   if (!['explainer', 'event'].includes(contentType)) return [...new Set(issues)];
   const headings = markdownHeadingCount(markdown);
   if (headings < 3 || headings > 5) issues.push('需要 3 至 5 个叙事性二级或三级标题');
-  const evidencePaths = visualAssets.filter(asset => asset.kind === 'x-post-evidence').map(asset => asset.localPath);
+  const evidencePaths = visualAssets.filter(asset => asset.kind === 'x-post-evidence').map(asset => normalizePath(asset.localPath));
   if (evidencePaths.some(path => !paths.includes(path))) issues.push('必须插入每一张 X 原帖截图');
   return [...new Set(issues)];
 }
