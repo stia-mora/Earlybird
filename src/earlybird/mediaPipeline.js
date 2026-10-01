@@ -1,5 +1,5 @@
 import { mkdir, stat } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { itemsFromTweet } from '../media/sources.js';

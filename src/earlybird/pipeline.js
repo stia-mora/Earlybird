@@ -14,6 +14,7 @@ import { collectTavilyImages, createTavilyImageSearch } from './tavilyImageSearc
 import { contentStandard, createEditorialOrchestrator, reviewInputHash } from './editorialReview.js';
 import { emptyEditorialResearch, gatherEditorialResearch, hasResearchPlan, selectEditorialResearch } from './editorialResearch.js';
 import { createEditorialXSearch } from './xResearchSearch.js';
+import { shanghaiDayRange } from './dailySummary.js';
 import { isNonemptyFile, sanitizeJsonUnicode } from './utils.js';
 
 const MAX_REWRITE_ATTEMPTS = 3;
@@ -120,9 +121,8 @@ async function saveReview(prisma, job, phase, attempt, decision, input) {
 
 async function candidateJobs(prisma, job, { dailyReview = false, now = new Date() } = {}) {
   if (!prisma?.earlyBirdArticleJob?.findMany) return [];
-  const chinaParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
-    .formatToParts(now).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
-  const start = dailyReview ? new Date(`${chinaParts.year}-${chinaParts.month}-${chinaParts.day}T00:00:00+08:00`) : new Date(job.detectedAt || now);
+  const dayRange = shanghaiDayRange(now);
+  const start = dailyReview ? dayRange.start : new Date(job.detectedAt || now);
   const end = dailyReview ? now : new Date(start.getTime() + reviewWindowMs());
   return prisma.earlyBirdArticleJob.findMany({
     where: { id: { not: job.id }, status: { in: dailyReview ? ['detected', 'verified'] : ['detected'] }, detectedAt: { gte: start, lte: end } },
@@ -201,8 +201,7 @@ export function createArticlePipeline({
     })));
   }
 
-  let processJob;
-  processJob = async (jobId, { force = false, dailyReview = false, preselectedDecision = null, mergeDepth = 0 } = {}) => {
+  async function processJob(jobId, { force = false, dailyReview = false, preselectedDecision = null, mergeDepth = 0 } = {}) {
       const job = await prisma.earlyBirdArticleJob.findUnique({ where: { id: jobId }, include: { post: true, source: true, draft: true } });
       if (!job) throw new Error(`EarlyBird job not found: ${jobId}`);
       if (job.status === 'merged') return job;
@@ -346,6 +345,6 @@ export function createArticlePipeline({
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'failed', error: error.message } });
         throw error;
       }
-  };
+  }
   return { process: processJob };
 }

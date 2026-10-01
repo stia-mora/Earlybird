@@ -90,15 +90,12 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
         const ordered = [...posts].sort((a, b) => comparePosts(a, b));
         if (!source.baselineComplete) {
           const newest = ordered.at(-1);
-          if (!newest) {
-            await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { baselineComplete: true, lastPolledAt: now(), lastError: null } });
-            await recordPoll(prisma, { sourceId: source.id, outcome: 'baseline', detectedCount: 0, polledAt: now() });
-            return { baseline: true, detected: 0 };
-          }
+          const cursor = newest ? {
+            lastSeenCreatedAt: newest.createdAt ? new Date(newest.createdAt) : null,
+            lastSeenPostId: newest.id || null,
+          } : {};
           await prisma.earlyBirdSource.update({ where: { id: source.id }, data: {
-            baselineComplete: true,
-            lastSeenCreatedAt: newest?.createdAt ? new Date(newest.createdAt) : null,
-            lastSeenPostId: newest?.id || null,
+            baselineComplete: true, ...cursor,
             lastPolledAt: now(), lastError: null,
           } });
           await recordPoll(prisma, { sourceId: source.id, outcome: 'baseline', detectedCount: 0, polledAt: now() });
@@ -108,10 +105,14 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
         let detected = 0;
         const postIds = [];
         for (const post of fresh) {
+          const postData = {
+            rawData: post, text: post.text || '', createdAt: post.createdAt ? new Date(post.createdAt) : null,
+            sourceUrl: `https://x.com/${source.handle}/status/${post.id}`, mediaData: post.media || [],
+          };
           const record = await prisma.earlyBirdPost.upsert({
             where: { sourceId_postId: { sourceId: source.id, postId: String(post.id) } },
-            update: { rawData: post, text: post.text || '', createdAt: post.createdAt ? new Date(post.createdAt) : null, sourceUrl: `https://x.com/${source.handle}/status/${post.id}`, mediaData: post.media || [] },
-            create: { sourceId: source.id, postId: String(post.id), rootPostId: String(post.id), sourceUrl: `https://x.com/${source.handle}/status/${post.id}`, authorUsername: post.author?.username || source.handle, text: post.text || '', createdAt: post.createdAt ? new Date(post.createdAt) : null, rawData: post, mediaData: post.media || [] },
+            update: postData,
+            create: { ...postData, sourceId: source.id, postId: String(post.id), rootPostId: String(post.id), authorUsername: post.author?.username || source.handle },
           });
           const job = await prisma.earlyBirdArticleJob.upsert({ where: { postId: record.id }, update: {}, create: { sourceId: source.id, postId: record.id, status: 'detected' } });
           if (queue) await queue.add('process', { jobId: job.id }, {
@@ -123,8 +124,11 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
           postIds.push(String(post.id));
         }
         const newest = ordered.at(-1);
-        if (newest && (isNewer(newest, source))) await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastSeenCreatedAt: newest.createdAt ? new Date(newest.createdAt) : null, lastSeenPostId: newest.id ? String(newest.id) : null, lastPolledAt: now(), lastError: null } });
-        else await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { lastPolledAt: now(), lastError: null } });
+        const cursor = newest && isNewer(newest, source) ? {
+          lastSeenCreatedAt: newest.createdAt ? new Date(newest.createdAt) : null,
+          lastSeenPostId: newest.id ? String(newest.id) : null,
+        } : {};
+        await prisma.earlyBirdSource.update({ where: { id: source.id }, data: { ...cursor, lastPolledAt: now(), lastError: null } });
         await recordPoll(prisma, { sourceId: source.id, outcome: detected ? 'detected' : 'no_new', detectedCount: detected, postIds: postIds.length ? postIds : undefined, polledAt: now() });
         return { baseline: false, detected };
       } catch (error) {

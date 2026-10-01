@@ -5,7 +5,7 @@ import { createArticlePipeline } from './pipeline.js';
 import { cacheScraperFactory, createSourceMonitor, defaultScraperFactory, retryAtFromRateLimit } from './sourceMonitor.js';
 import { enqueueInterruptedJobs, enqueueLegacyEditorialJobs } from './jobRecovery.js';
 import { pollIntervalMs, startupPollDelay } from './sourcePollTiming.js';
-import { buildDailySummary } from './dailySummary.js';
+import { buildDailySummary, shanghaiDayRange } from './dailySummary.js';
 import { createHermesNotifier } from './hermesNotifier.js';
 
 const redisUrl = process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`;
@@ -78,9 +78,7 @@ async function sendDailySummary() {
 
 async function runDailyEditorialReview() {
   const now = new Date();
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
-    .formatToParts(now).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
-  const start = new Date(`${parts.year}-${parts.month}-${parts.day}T00:00:00+08:00`);
+  const { start } = shanghaiDayRange(now);
   const jobs = await prisma.earlyBirdArticleJob.findMany({
     where: { status: { in: ['detected', 'verified'] }, detectedAt: { gte: start, lte: now } },
     select: { id: true },
@@ -119,9 +117,7 @@ async function scheduleSources({ cleanStale = false } = {}) {
   for (const job of await monitorQueue.getJobs(['waiting', 'delayed', 'active'])) {
     if (job.name !== 'poll' || !job.data?.sourceId) continue;
     const state = await job.getState();
-    if (state === 'active') {
-      pendingOrActive.add(job.data.sourceId);
-    } else if (cleanStale) {
+    if (state !== 'active' && cleanStale) {
       await job.remove();
     } else {
       pendingOrActive.add(job.data.sourceId);
