@@ -36,7 +36,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'dashboard', 'data', 'ask-index.json');
 const ENGINE_SRC = join(ROOT, 'src', 'ask');
 const ENGINE_OUT = join(ROOT, 'dashboard', 'js', 'ask');
-const BLOB = 'https://github.com/nirholas/XActions/blob/main/';
+const BLOB = 'https://github.com/stia-mora/Earlybird/blob/main/';
 const CHECK = process.argv.includes('--check');
 const MAX_CHUNK = 1100;
 

@@ -20,7 +20,7 @@ describe('ask engine: retrieval over the real index', () => {
     for (const kind of ['doc', 'skill', 'script', 'repo', 'page']) expect(index.counts[kind]).toBeGreaterThan(0);
     expect(searcher.size).toBe(index.chunks.length);
     for (const c of index.chunks.slice(0, 200)) {
-      expect(c.u).toMatch(/^https:\/\/(xactions\.app|github\.com\/nirholas\/XActions)\//);
+      expect(c.u).toMatch(/^https:\/\/(xactions\.app|github\.com\/stia-mora\/Earlybird)\//);
       expect(c.x.length).toBeLessThanOrEqual(1100);
     }
   });

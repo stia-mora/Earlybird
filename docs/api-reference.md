@@ -319,7 +319,7 @@ import { browserScripts } from 'xactions';
 console.log(Object.keys(browserScripts));
 ```
 
-See the [full catalog in the README](../README.md#-complete-feature-list).
+See the [XActions toolkit and documentation](../README.md).
 
 ---
 
