@@ -1,5 +1,6 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
+import { isNonemptyFile } from './utils.js';
 
 function extractJson(text) {
   const value = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
@@ -50,12 +51,7 @@ export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_
 async function existingImages(images) {
   const available = await Promise.all(images.map(async image => {
     if (image?.data) return image;
-    try {
-      const info = await stat(image.path);
-      return info.isFile() && info.size > 0 ? image : null;
-    } catch {
-      return null;
-    }
+    return await isNonemptyFile(image?.path) ? image : null;
   }));
   return available.filter(Boolean);
 }

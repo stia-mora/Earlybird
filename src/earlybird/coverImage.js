@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { isNonemptyFile } from './utils.js';
 
 const execFileAsync = promisify(execFile);
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -16,15 +17,6 @@ function coverConcept(contentType) {
   if (contentType === 'event') return 'interconnected signal paths converging into a single, clearly legible technological development';
   if (contentType === 'brief') return 'one precise visual metaphor for a newly announced technological development';
   return 'a clear visual metaphor that explains an emerging technological development';
-}
-
-async function existingFile(path) {
-  try {
-    const info = await stat(path);
-    return info.isFile() && info.size > 0;
-  } catch {
-    return false;
-  }
 }
 
 function decodeImageData(value) {
@@ -79,7 +71,7 @@ export async function normalizeCoverImage({ sourcePath, outputPath, ffmpegPath =
     '-vf', `scale=${WECHAT_COVER_SIZE.width}:${WECHAT_COVER_SIZE.height}:force_original_aspect_ratio=increase,crop=${WECHAT_COVER_SIZE.width}:${WECHAT_COVER_SIZE.height}`,
     '-frames:v', '1', '-q:v', '2', '-pix_fmt', 'yuvj444p', outputPath,
   ], { windowsHide: true });
-  if (!(await existingFile(outputPath))) throw new Error('ffmpeg did not create the WeChat cover image');
+  if (!(await isNonemptyFile(outputPath))) throw new Error('ffmpeg did not create the WeChat cover image');
   return outputPath;
 }
 
@@ -120,7 +112,7 @@ export function createCoverImageGenerator({
 
   return {
     async generate({ postId, title, digest, analysis, editorial, previous } = {}) {
-      if (previous?.status === 'generated' && previous.localPath && await existingFile(previous.localPath)) {
+      if (previous?.status === 'generated' && previous.localPath && await isNonemptyFile(previous.localPath)) {
         return { ...previous, reused: true };
       }
       if (!providers.length) throw new Error('EARLYBIRD_COVER_IMAGE_API_KEY and EARLYBIRD_COVER_IMAGE_BASE_URL are not configured');

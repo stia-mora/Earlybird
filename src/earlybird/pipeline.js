@@ -1,5 +1,4 @@
 import { basename, join } from 'node:path';
-import { stat } from 'node:fs/promises';
 import { assembleThread } from './threadAssembler.js';
 import { analyzePost, createMultimodalClient } from './aiPipeline.js';
 import { humanize } from './humanizer.js';
@@ -15,7 +14,7 @@ import { collectTavilyImages, createTavilyImageSearch } from './tavilyImageSearc
 import { contentStandard, createEditorialOrchestrator, reviewInputHash } from './editorialReview.js';
 import { emptyEditorialResearch, gatherEditorialResearch, hasResearchPlan, selectEditorialResearch } from './editorialResearch.js';
 import { createEditorialXSearch } from './xResearchSearch.js';
-import { sanitizeJsonUnicode } from './utils.js';
+import { isNonemptyFile, sanitizeJsonUnicode } from './utils.js';
 
 const MAX_REWRITE_ATTEMPTS = 3;
 
@@ -32,23 +31,14 @@ function reviewWindowMs() {
   return Math.max(1, configuredNumber('EARLYBIRD_EDITORIAL_BATCH_MINUTES', 30)) * 60 * 1000;
 }
 
-async function existingFile(path) {
-  try {
-    const info = await stat(path);
-    return info.isFile() && info.size > 0;
-  } catch {
-    return false;
-  }
-}
-
 async function existingAssets(assets) {
   const available = await Promise.all((assets || []).map(async asset => {
-    if (!asset?.localPath || !(await existingFile(asset.localPath))) return null;
+    if (!asset?.localPath || !(await isNonemptyFile(asset.localPath))) return null;
     if (asset.kind !== 'video') return asset;
     const metadata = { ...(asset.metadata || {}) };
-    if (metadata.posterPath && !(await existingFile(metadata.posterPath))) delete metadata.posterPath;
-    if (metadata.audioPath && !(await existingFile(metadata.audioPath))) delete metadata.audioPath;
-    metadata.keyframes = (await Promise.all((metadata.keyframes || []).map(async path => (await existingFile(path)) ? path : null))).filter(Boolean);
+    if (metadata.posterPath && !(await isNonemptyFile(metadata.posterPath))) delete metadata.posterPath;
+    if (metadata.audioPath && !(await isNonemptyFile(metadata.audioPath))) delete metadata.audioPath;
+    metadata.keyframes = (await Promise.all((metadata.keyframes || []).map(async path => (await isNonemptyFile(path)) ? path : null))).filter(Boolean);
     return { ...asset, metadata };
   }));
   return available.filter(Boolean);

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 
 export const DEFAULT_SOURCES = [
   { handle: 'openai', displayName: 'OpenAI', website: 'https://openai.com' },
@@ -41,6 +41,28 @@ export function sha256(buffer) {
 
 export async function fileSha256(path) {
   return sha256(await readFile(path));
+}
+
+export async function isNonemptyFile(path) {
+  try {
+    const info = await stat(path);
+    return info.isFile() && info.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+export function compactText(value, maximum = 300) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text.length > maximum ? `${text.slice(0, maximum - 1)}…` : text;
 }
 
 export function jsonParse(value, fallback = null) {

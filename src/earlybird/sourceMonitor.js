@@ -1,4 +1,4 @@
-import { DEFAULT_SOURCES, comparePosts } from './utils.js';
+import { DEFAULT_SOURCES, comparePosts, withTimeout } from './utils.js';
 import { readFile } from 'node:fs/promises';
 import { normalizeCookies } from '../scrapers/twitter/http/accountPool.js';
 
@@ -12,14 +12,6 @@ const ARTICLE_QUEUE_OPTIONS = {
 export function editorialBatchDelay(now = Date.now(), intervalMs = Number(process.env.EARLYBIRD_EDITORIAL_BATCH_MINUTES || 30) * 60 * 1000) {
   const interval = Math.max(60_000, intervalMs);
   return Math.max(0, Math.ceil(now / interval) * interval - now);
-}
-
-function withTimeout(promise, timeoutMs) {
-  let timer;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`source poll timed out after ${timeoutMs}ms`)), timeoutMs); }),
-  ]).finally(() => clearTimeout(timer));
 }
 
 function isNewer(post, source) {
@@ -93,8 +85,8 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
       const source = await prisma.earlyBirdSource.findUnique({ where: { id: sourceId } });
       if (!source || !source.enabled) return { baseline: false, detected: 0 };
       try {
-        const scraper = await withTimeout(scraperFactory(source), pollTimeoutMs);
-        const posts = (await withTimeout(scraper.scrapeTweets(source.handle, { limit: 20, includeReplies: false }), pollTimeoutMs)) || [];
+        const scraper = await withTimeout(scraperFactory(source), pollTimeoutMs, 'source poll');
+        const posts = (await withTimeout(scraper.scrapeTweets(source.handle, { limit: 20, includeReplies: false }), pollTimeoutMs, 'source poll')) || [];
         const ordered = [...posts].sort((a, b) => comparePosts(a, b));
         if (!source.baselineComplete) {
           const newest = ordered.at(-1);

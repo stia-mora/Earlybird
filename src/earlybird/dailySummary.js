@@ -1,3 +1,5 @@
+import { compactText } from './utils.js';
+
 const SHANGHAI_OFFSET = '+08:00';
 
 function chinaDay(value) {
@@ -13,17 +15,12 @@ export function shanghaiDayRange(now = new Date()) {
   return { day, start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
 }
 
-function compact(value, maximum = 88) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  return text.length > maximum ? `${text.slice(0, maximum - 1)}…` : text;
-}
-
 function excludedReason(job) {
   if (!job) return '未进入文章处理队列';
-  if (job.status === 'ignored') return `旧版筛选历史：${compact(job.metadata?.editorial?.reason || '该帖未按旧版规则独立制作', 120)}`;
+  if (job.status === 'ignored') return `旧版筛选历史：${compactText(job.metadata?.editorial?.reason || '该帖未按旧版规则独立制作', 120)}`;
   if (job.status === 'merged') return '旧版事件合并历史';
   if (job.status === 'manual_review') return '质量审校要求人工处理';
-  if (job.status === 'failed') return `处理失败：${compact(job.error || '未知错误', 100)}`;
+  if (job.status === 'failed') return `处理失败：${compactText(job.error || '未知错误', 100)}`;
   return `仍在处理中：${job.status}`;
 }
 
@@ -56,7 +53,7 @@ export async function buildDailySummary({ prisma, now = new Date() } = {}) {
       source.drafts += 1;
       continue;
     }
-    excluded.push({ handle: source.handle, postId: post.postId, text: compact(post.text), reason: excludedReason(job) });
+    excluded.push({ handle: source.handle, postId: post.postId, text: compactText(post.text, 88), reason: excludedReason(job) });
   }
   const sourceLines = [...perSource.values()].map(source => `@${source.handle}：新帖 ${source.posts} 条，草稿 ${source.drafts} 篇`);
   const reasonCounts = new Map();

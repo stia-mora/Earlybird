@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { itemsFromTweet } from '../media/sources.js';
 import { downloadAll } from '../media/download.js';
 import { openArchive } from '../media/archive.js';
-import { fileSha256 } from './utils.js';
+import { fileSha256, isNonemptyFile } from './utils.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -14,12 +14,7 @@ function mediaKind(item) {
 }
 
 async function existingFile(path) {
-  try {
-    const info = await stat(path);
-    return info.isFile() && info.size > 0 ? path : null;
-  } catch {
-    return null;
-  }
+  return await isNonemptyFile(path) ? path : null;
 }
 
 export function createMediaPipeline({ prisma, outputDir = process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', publicBaseUrl = process.env.EARLYBIRD_PUBLIC_MEDIA_URL || '', ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg', logger = console } = {}) {

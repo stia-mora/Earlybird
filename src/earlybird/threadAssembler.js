@@ -1,10 +1,4 @@
-function withTimeout(promise, timeoutMs) {
-  let timer;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`thread fetch timed out after ${timeoutMs}ms`)), timeoutMs); }),
-  ]).finally(() => clearTimeout(timer));
-}
+import { withTimeout } from './utils.js';
 
 export async function assembleThread({ scraper, post, waitMs = 90000, timeoutMs = 60000, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), logger = console } = {}) {
   if (!scraper) throw new Error('thread assembler requires scraper');
@@ -20,6 +14,7 @@ export async function assembleThread({ scraper, post, waitMs = 90000, timeoutMs 
           ? scraper.scrapeThread(rootId)
           : fallback,
       timeoutMs,
+      'thread fetch',
     );
   } catch (error) {
     logger.warn?.(`EarlyBird thread fetch fell back to the root post: ${error.message}`);

@@ -1,9 +1,5 @@
 import { readFile } from 'node:fs/promises';
-
-function compact(value, maximum = 300) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  return text.length > maximum ? `${text.slice(0, maximum - 1)}…` : text;
-}
+import { compactText } from './utils.js';
 
 export function createHermesNotifier({
   prisma,
@@ -49,10 +45,10 @@ export function createHermesNotifier({
         signal: AbortSignal.timeout(timeoutMs),
       });
       const detail = await response.text();
-      if (!response.ok) throw new Error(`Hermes relay returned ${response.status}: ${compact(detail, 180)}`);
+      if (!response.ok) throw new Error(`Hermes relay returned ${response.status}: ${compactText(detail, 180)}`);
       return updateDelivery(dedupeKey, { ...record, status: 'sent', sentAt: now() });
     } catch (error) {
-      await updateDelivery(dedupeKey, { ...record, status: 'failed', error: compact(error.message, 500) });
+      await updateDelivery(dedupeKey, { ...record, status: 'failed', error: compactText(error.message, 500) });
       throw error;
     }
   }
@@ -80,8 +76,8 @@ export function createHermesNotifier({
         kind: 'manual_review',
         dedupeKey: `manual-review:${job.id}:${job.metadata?.review?.at || job.updatedAt || ''}`,
         subject: 'EarlyBird：稿件需要人工审核',
-        message: `任务：${job.id}\n标题：${title}\n原因：${compact(reason, 800)}`,
-        payload: { jobId: job.id, reason: compact(reason, 800), review: job?.metadata?.review || null },
+        message: `任务：${job.id}\n标题：${title}\n原因：${compactText(reason, 800)}`,
+        payload: { jobId: job.id, reason: compactText(reason, 800), review: job?.metadata?.review || null },
       });
     },
     dailySummary(summary) {
