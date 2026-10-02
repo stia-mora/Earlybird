@@ -58,14 +58,19 @@ describe('explainer reading and visual standards', () => {
     expect(missing.visualPlan[0].purpose).toBe('补足测试条件');
   });
 
-  it('shows the explanatory caption and source beneath the image in compliant HTML', async () => {
-    const caption = '橙色柱表示位置误差，数值越低越好。结果仅适用于图中的测试条件。';
+  it('keeps one concise image note and moves full source URLs into the final references', async () => {
+    const caption = '橙色柱表示位置误差，数值越低越好。';
+    const references = Array.from({ length: 8 }, (_, index) => `https://example.org/report/${index}`);
     const html = await renderGzhMarkdown(`![${caption}](figure.png)`, {
       contentType: 'explainer',
+      references,
       imageAttributions: [{ src: 'figure.png', sourceUrl: 'https://example.org/paper', label: '图片来源：原论文' }],
     });
-    expect(html).toMatch(/<img[^>]+>\s*<p[^>]+><span leaf="">橙色柱/);
-    expect(html).toContain('图片来源：原论文：https://example.org/paper');
+    const note = html.match(/<img[^>]+>\s*<p[^>]+><span leaf="">([^<]*)<\/span><\/p>/)?.[1];
+    expect(note).toBe(`${caption}来源：原论文`);
+    expect(note).not.toContain('https://');
+    expect(html.indexOf('https://example.org/paper')).toBeGreaterThan(html.indexOf('参考资料：'));
+    expect(html).not.toContain('图片来源：原论文：https://example.org/paper');
     expect(html.match(new RegExp(caption, 'g'))).toHaveLength(2); // accessible alt and visible caption
     await validateGzhHtml(html);
   });
