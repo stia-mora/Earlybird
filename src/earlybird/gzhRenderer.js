@@ -1,3 +1,4 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -81,7 +82,7 @@ function inline(text, emphasis = '') {
   return markKeywords(text, emphasis);
 }
 
-function referenceUrls(references) {
+function referenceUrls(references, maximum = 8) {
   const urls = new Set();
   for (const reference of references || []) {
     try {
@@ -89,7 +90,7 @@ function referenceUrls(references) {
       if (url.protocol === 'https:') urls.add(url.toString());
     } catch {}
   }
-  return [...urls].slice(0, 8);
+  return [...urls].slice(0, maximum);
 }
 
 function normalizedTitle(value) {
@@ -163,11 +164,16 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
       }
       const image = item.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       if (image) {
-        html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(sanitizeEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' '))}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
+        const caption = sanitizeEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' ');
+        html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(caption)}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
         const attribution = imageAttribution(image[2], imageAttributions);
-        if (attribution?.sourceUrl) {
+        if (contentType === 'explainer') {
+          const source = attribution?.sourceUrl ? plainText(attribution.label || attribution.sourceDomain || '').replace(/^(?:图片)?来源[：:]\s*/, '') : '';
+          const note = [caption, source ? `来源：${source}` : ''].filter(Boolean).join(' ');
+          if (note) html += `<p style="font-size:13px;color:#71717A;line-height:1.6;margin:-12px 0 20px;"><span leaf="">${escapeHtml(fullWidthPunctuation(note))}</span></p>`;
+        } else if (attribution?.sourceUrl) {
           const label = plainText(attribution.label || attribution.sourceDomain || '图片来源');
-          html += `<p style="font-size:12px;color:#A1A1AA;line-height:1.6;margin:-12px 0 20px;"><span leaf="">${escapeHtml(label)}：${escapeHtml(attribution.sourceUrl)}</span></p>`;
+          html += `<p style="font-size:12px;color:#71717A;line-height:1.6;margin:-12px 0 20px;word-break:break-all;"><span leaf="">${escapeHtml(label)}：${escapeHtml(attribution.sourceUrl)}</span></p>`;
         }
         continue;
       }
@@ -185,7 +191,9 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
     }
     html += '</section>';
   });
-  const sourceUrls = referenceUrls(references);
+  const sourceUrls = contentType === 'explainer'
+    ? referenceUrls([...references, ...imageAttributions.map(item => item?.sourceUrl).filter(Boolean)], Infinity)
+    : referenceUrls(references);
   if (sourceUrls.length) {
     html += '<section style="margin:48px 10px 28px;padding-top:20px;border-top:1px solid #E4E4E7;">';
     html += '<p style="font-size:14px;color:#71717A;line-height:1.8;margin:0 0 12px;"><span leaf="">参考资料：</span></p>';

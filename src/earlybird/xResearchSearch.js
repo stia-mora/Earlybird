@@ -1,3 +1,4 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
 import puppeteer from 'puppeteer';
 import { configuredXCookies } from './sourceMonitor.js';
 import { xBrowserCookies } from './evidenceCapture.js';

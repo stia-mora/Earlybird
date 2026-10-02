@@ -1,3 +1,4 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
 import { DEFAULT_SOURCES, comparePosts, withTimeout } from './utils.js';
 import { readFile } from 'node:fs/promises';
 import { normalizeCookies } from '../scrapers/twitter/http/accountPool.js';

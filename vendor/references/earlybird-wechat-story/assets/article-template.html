@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{TITLE}}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; color: #242424; }
+    article { overflow-wrap: anywhere; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    h1 { margin: 0 0 14px; font-size: 28px; line-height: 1.4; letter-spacing: -.3px; }
+    h2 { margin: 36px 0 18px; font-size: 21px; line-height: 1.55; }
+    p { margin: 0 0 18px; }
+    a { color: #335d7c; text-underline-offset: 3px; }
+    figure { margin: 24px 0; }
+    img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+    figcaption { margin-top: 9px; color: #606060; font-size: 13px; line-height: 1.6; text-align: left; }
+    blockquote { margin: 22px 0; padding: 4px 0 4px 16px; border-left: 3px solid #d1d8de; color: #444; }
+    blockquote p:last-child { margin-bottom: 0; }
+    .meta { margin-bottom: 24px; color: #686868; font-size: 13px; }
+    .sources { margin-top: 36px; padding-top: 18px; border-top: 1px solid #ddd; font-size: 13px; line-height: 1.7; }
+    @media (max-width: 430px) { h1 { font-size: 26px; } }
+  </style>
+</head>
+<body>
+  <!-- 填充真实稿件；缺项删除，不保留占位符。文字和 URL 属性按 HTML 转义。 -->
+  <article style="max-width:680px;margin:0 auto;padding:28px 18px 48px;font-size:17px;line-height:1.85;">
+    <header>
+      <h1>{{TITLE}}</h1>
+      <p class="meta">{{BYLINE_AND_DATE}}</p>
+    </header>
+    {{COVER_FIGURE_HTML}}
+    {{BODY_HTML}}
+    <footer class="sources">
+      <p><strong>参考资料</strong></p>
+      {{REFERENCES_HTML}}
+    </footer>
+  </article>
+  <!--
+  BODY_HTML 的图文块示例；每个实际使用的 figure 都应有来源和标记。
+  <p>解释为什么现在要看这张图，以及重点在哪里。</p>
+  <figure>
+    <img src="assets/e01.webp" alt="准确描述该图的可见内容">
+    <figcaption>读图提示、必要条件。来源：<a href="原始页面URL">原发布者/论文图号</a>。</figcaption>
+  </figure>
+  <p>结合证据推进结论，说明尚不能推出什么。</p>
+  封面若为生成图，其 figcaption 写明 AI 生成概念图；不要复用原账号品牌或推广尾图。
+  公众号导入可能不保留 style/figure，须对实际导入结果做检查或改用内联 section/p。
+  -->
+</body>
+</html>

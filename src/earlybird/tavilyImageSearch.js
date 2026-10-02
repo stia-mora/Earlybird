@@ -1,3 +1,4 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
@@ -98,13 +99,15 @@ export function createTavilyImageSearch({ apiKey = process.env.EARLYBIRD_TAVILY_
   };
 }
 
-export async function collectTavilyImages({ search = createTavilyImageSearch(), prisma, post, visualPlan = [], needed = 0, outputDir = process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', fetchImpl = globalThis.fetch, logger = console } = {}) {
-  if (!post || needed <= 0 || !search.configured) return [];
+export async function collectTavilyImages({ search = createTavilyImageSearch(), prisma, post, visualPlan = [], needed = 0, completePlan = false, existingAssets = [], outputDir = process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', fetchImpl = globalThis.fetch, logger = console } = {}) {
+  if (!post || (!completePlan && needed <= 0) || !search.configured) return [];
   await mkdir(outputDir, { recursive: true });
   const assets = [];
-  const seen = new Set();
+  const seen = new Set(existingAssets.map(asset => asset.sourceUrl).filter(Boolean));
+  const hashes = new Set(existingAssets.map(asset => asset.sha256).filter(Boolean));
   for (const plan of visualPlan) {
-    if (assets.length >= needed) break;
+    if (!completePlan && assets.length >= needed) break;
+    let planImages = 0;
     let results = [];
     try {
       results = await search.search(plan.query);
@@ -113,7 +116,9 @@ export async function collectTavilyImages({ search = createTavilyImageSearch(), 
       continue;
     }
     for (const result of results) {
-      if (assets.length >= needed || seen.has(result.imageUrl)) continue;
+      // Sample each story node rather than letting the first query fill the quota.
+      if (completePlan ? planImages >= 2 : assets.length >= needed) break;
+      if (seen.has(result.imageUrl)) continue;
       seen.add(result.imageUrl);
       try {
         const response = await fetchImpl(result.imageUrl, { signal: AbortSignal.timeout(30000) });
@@ -122,6 +127,8 @@ export async function collectTavilyImages({ search = createTavilyImageSearch(), 
         const buffer = Buffer.from(await response.arrayBuffer());
         if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) continue;
         const digest = createHash('sha256').update(buffer).digest('hex');
+        if (hashes.has(digest)) continue;
+        hashes.add(digest);
         const localPath = join(outputDir, `${post.postId}-tavily-${digest.slice(0, 16)}${extension(new URL(result.imageUrl), contentType)}`);
         await writeFile(localPath, buffer);
         const data = {
@@ -140,6 +147,7 @@ export async function collectTavilyImages({ search = createTavilyImageSearch(), 
             description: result.description,
             query: result.query,
             purpose: compact(plan.purpose),
+            sourceStatus: result.sourcePageUrl === result.imageUrl ? 'original-page-missing' : 'search-result-page',
             altText: compact(plan.altText || result.description || result.title || '来自网页检索的图片', 120),
             attribution: `图片来源：${result.sourceDomain}`,
             retrievedAt: new Date().toISOString(),
@@ -149,6 +157,7 @@ export async function collectTavilyImages({ search = createTavilyImageSearch(), 
           ? await prisma.earlyBirdAsset.upsert({ where: { postId_sourceUrl: { postId: post.id, sourceUrl: result.imageUrl } }, update: data, create: data })
           : { ...data, id: `tavily-${assets.length}` };
         assets.push(asset);
+        planImages += 1;
       } catch (error) {
         logger.warn?.('EarlyBird Tavily image download failed', result.imageUrl, error.message);
       }

@@ -216,6 +216,7 @@ function collectMarkdown(dir, found = []) {
     if (SKIP_DIRS.has(entry.name)) continue;
 
     const full = join(dir, entry.name);
+    if (full === join(ROOT, 'vendor', 'skills')) continue; // Gitignored local upstream clones.
     if (entry.isDirectory()) collectMarkdown(full, found);
     else if (entry.name.endsWith('.md')) found.push(full);
   }
@@ -319,7 +320,7 @@ const files = roots.length > 0
 
 for (const file of files) {
   const content = readFileSync(file, 'utf8');
-  const rel = relative(ROOT, file);
+  const rel = relative(ROOT, file).replace(/\\/g, '/');
   const lines = content.split('\n');
   const prose = stripCode(content);
 

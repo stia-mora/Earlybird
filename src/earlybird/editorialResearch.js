@@ -1,3 +1,4 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
 import { postUrl } from './utils.js';
 
 const MAX_X_QUERIES = 3;
@@ -49,6 +50,7 @@ function tweetEvidence(tweet, query, method = 'http') {
     createdAt: tweet.createdAt || null,
     text: compact(tweet.text, 1_200),
     mediaCount: Array.isArray(tweet.media) ? tweet.media.length : 0,
+    tweet,
     query: compact(query),
     method,
   };

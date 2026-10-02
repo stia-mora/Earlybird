@@ -1,3 +1,4 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
 export async function enqueueInterruptedJobs({ prisma, queue, now = () => Date.now(), delayMs = 10000 } = {}) {
   if (!prisma?.earlyBirdArticleJob || !queue) throw new Error('job recovery requires prisma and queue');
   const jobs = await prisma.earlyBirdArticleJob.findMany({
