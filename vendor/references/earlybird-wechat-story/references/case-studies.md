@@ -1,10 +1,10 @@
 # 归档案例：故事与图片怎样接力
 
-以下是写法分析，不是对报道事实的核验。文章文件位于用户归档的 `articles/`，图片在相邻 `assets/`。提供编号与文件名方便回看；skill 离开这台机器后，仍可直接使用这些编辑结论。
+以下是写法分析，不是对报道事实的核验。原归档位于项目工作目录的 `data/图文归档`，未随 Git 仓库发布；以下文件路径均相对此归档，文章在 `articles/`，图片在相邻 `assets/`。提供编号与文件名方便回看；skill 离开这台机器后，仍可直接使用这些编辑结论。
 
 ## 44161：机器人发布，先看动作再解释方法
 
-文件：[44161.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/44161.html)。
+文件：`articles/44161.html`。
 
 顺序：家务动作串联 → 拉门借力 → 人类数据 → 长程任务衔接与纠错 → 控制误差比较 → 团队与应用。
 
@@ -16,7 +16,7 @@
 
 ## 39586：榜单作开头证据，但必须解释榜单口径
 
-文件：[39586.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/39586.html)。
+文件：`articles/39586.html`。
 
 顺序：两张热榜 → 开发者生态与演示 → 常见转写问题 → 方法架构 → 更具体的评测与产品。
 
@@ -26,7 +26,7 @@
 
 ## 3227：事故故事，人物照和聊天记录各有作用
 
-文件：[3227.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/3227.html)。
+文件：`articles/3227.html`。
 
 顺序：订课目标 → 意外取消别人 → 无法撤销 → 机制解释 → 更广影响与责任。
 
@@ -36,7 +36,7 @@
 
 ## 3247：宕机，状态记录与用户感受不能互相替代
 
-文件：[3247.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/3247.html)。
+文件：`articles/3247.html`。
 
 顺序：服务中断 → 错误码 → 状态时间线 → 官方恢复与用户未恢复的反差 → 历史频率 → 长任务损失。
 
@@ -46,7 +46,7 @@
 
 ## 3200：论文图注，替读者指出图的结构
 
-文件：[3200.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/3200.html)。
+文件：`articles/3200.html`。
 
 顺序：无线预测瓶颈 → 论文身份 → 场景 → 框架 → 两阶段方法 → 实验表/曲线 → 消融与局限。
 
@@ -56,7 +56,7 @@
 
 ## 3205 与 27457：争议中的证据边界
 
-文件：[3205.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/3205.html)、[27457.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/27457.html)。
+文件：`articles/3205.html`、`articles/27457.html`。
 
 3205 将指控、回应与另一位研究者的长文穿插；`4949e09b1b68f61c810606d975ff57a3.img` 是回应，`58f1eeb623e281201ea6dae47111161c.img` 是长文片段。27457 用官网、帖子与活动说明对照两个活动的先后和条款。
 
@@ -64,7 +64,7 @@
 
 ## 3245：AI 产品报道里的生成内容可以是样例
 
-文件：[3245.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/3245.html)。
+文件：`articles/3245.html`。
 
 顺序：创作痛点 → 输入/输出尝试 → 价格/榜单 → 工作流 UI → 主体资产与连续镜头 → 完整作品。
 
@@ -76,11 +76,11 @@
 
 | 文件 | 观察重点 | 可迁移与需补强之处 |
 |---|---|---|
-| [42269.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/42269.html) | 直播场景、换装 GIF、挑战记录、论文图 | 用现场变化引出实时性；人物是生成角色，收入记录要区分计量单位与轮次 |
-| [34126.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/34126.html) | 数据图 → 报告封面 → 机制解释 | 每张数据图都有一个结论；未来预测不能当既成事实，报告标题不能代替样本口径 |
-| [3211.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/3211.html) | 新闻标题截屏、当事人合照、博客原文摘录 | 视觉化资本故事；in talks 只能支持洽谈，合照不能证明新交易已完成 |
-| [3218.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/3218.html) | 方法对照图、效果表、速度质量曲线 | 同时解释收益和代价；最高提升与平均提升分开，接受率与端到端吞吐分开 |
-| [3209.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/3209.html) | 综述架构、类别地图、评估图及图注 | 图把复杂层次组织起来；正文说清当前这一层，不连续堆多张全景图 |
-| [3194.html](E:/Group-projects/EarlyBird-Pulse/data/图文归档/articles/3194.html) | 强烈数字反差、长技术解读，非复用图只有封面 | 可学问题驱动开场；需补真实方法/实验图，并核验估算基线与实际测量能否直接相比 |
+| `articles/42269.html` | 直播场景、换装 GIF、挑战记录、论文图 | 用现场变化引出实时性；人物是生成角色，收入记录要区分计量单位与轮次 |
+| `articles/34126.html` | 数据图 → 报告封面 → 机制解释 | 每张数据图都有一个结论；未来预测不能当既成事实，报告标题不能代替样本口径 |
+| `articles/3211.html` | 新闻标题截屏、当事人合照、博客原文摘录 | 视觉化资本故事；in talks 只能支持洽谈，合照不能证明新交易已完成 |
+| `articles/3218.html` | 方法对照图、效果表、速度质量曲线 | 同时解释收益和代价；最高提升与平均提升分开，接受率与端到端吞吐分开 |
+| `articles/3209.html` | 综述架构、类别地图、评估图及图注 | 图把复杂层次组织起来；正文说清当前这一层，不连续堆多张全景图 |
+| `articles/3194.html` | 强烈数字反差、长技术解读，非复用图只有封面 | 可学问题驱动开场；需补真实方法/实验图，并核验估算基线与实际测量能否直接相比 |
 
 以上 14 篇的不同结构支持“按事件选叙事和图”的方法，没有支持一套所有文章通用的固定图数或章节数。

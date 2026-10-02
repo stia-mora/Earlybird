@@ -1,3 +1,4 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
 import { mkdir, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { execFile } from 'node:child_process';

@@ -764,7 +764,7 @@ the narrative catalogue is [skills.md](skills.md).
 | Directory | Contents |
 |-----------|----------|
 | `api/server.js` | Express entry point |
-| `api/routes/` | 40 route modules |
+| `api/routes/` | 41 route modules |
 | `api/services/` | Business logic |
 | `api/middleware/` | Auth, rate limiting |
 | `api/config/` | Configuration |
@@ -852,7 +852,7 @@ rows on every run and fails the build when one has drifted.
 | CLI commands * | 56 | the `GROUPS` arrays in `src/cli/help-groups.js`, which is what `xactions --help` prints |
 | CLI subcommands | 85 | the subcommands registered under those commands |
 | Agent skills * | 50 | directories under `skills/`, indexed in `skills/index.json` |
-| API route modules * | 40 | `.js` files in `api/routes/` |
+| API route modules * | 41 | `.js` files in `api/routes/` |
 | Browser console scripts | 95 | files in `scripts/` carrying a "Paste in DevTools" header, catalogued in [browser-scripts.md](browser-scripts.md) |
 | Standalone console variants | 110 | `.js` files in `scripts/twitter/` |
 | Library modules at `src/` top level | 131 | `.js` files directly in `src/` |

@@ -1,3 +1,4 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
 import { createHash } from 'node:crypto';
 import { articleVisualAssets, editorialImages, editorialStructureIssues, markdownBodyLength } from './articleWriter.js';
 import { EXPLAINER_NARRATIVE_RULES, EXPLAINER_VISUAL_RULES, loadExplainerSkills } from './explainerSkills.js';
