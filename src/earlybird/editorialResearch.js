@@ -49,6 +49,7 @@ function tweetEvidence(tweet, query, method = 'http') {
     createdAt: tweet.createdAt || null,
     text: compact(tweet.text, 1_200),
     mediaCount: Array.isArray(tweet.media) ? tweet.media.length : 0,
+    tweet,
     query: compact(query),
     method,
   };

@@ -320,7 +320,7 @@ describe('independent editorial review', () => {
 
   it('flags a draft with insufficient body, images, or sources before model approval', () => {
     const issues = draftQualityIssues({ markdown: '很短的说明。', contentType: 'explainer', assets: [], references: [] });
-    expect(issues).toEqual(expect.arrayContaining(['正文不足 1200 个中文字符', '需要至少 3 张可用正文图片', '缺少可核查的来源链接']));
+    expect(issues).toEqual(expect.arrayContaining(['正文不足 1200 个中文字符', '需要至少 5 张可用正文图片', '缺少可核查的来源链接']));
   });
 
   it('lets the orchestrator select only evidence returned by its bounded research plan', async () => {
@@ -462,12 +462,12 @@ describe('thread assembly and humanizer', () => {
     expect(visuals).toEqual([expect.objectContaining({ localPath: 'post-evidence.png', kind: 'x-post-evidence' })]);
   });
   it('reports missing long-form requirements and lets a final revision satisfy them', async () => {
-    const evidence = ['post-evidence-1.png', 'post-evidence-2.png', 'post-evidence-3.png'];
+    const evidence = ['post-evidence-1.png', 'post-evidence-2.png', 'post-evidence-3.png', 'post-evidence-4.png', 'post-evidence-5.png'];
     const paragraphs = Array.from({ length: 25 }, (_, index) => `第 ${index + 1} 项公开说明将事件披露、代理外部行动和后续治理放入一条可核查的事实链，也明确了读者需要继续观察的具体边界。`).join('\n\n');
     const complete = vi.fn()
       .mockResolvedValueOnce({ title: '短稿', digest: '摘要', markdown: '这是一段不完整的短稿。' })
       .mockResolvedValueOnce({ title: '仍然过短', digest: '摘要', markdown: '这是一段不完整的短稿。' })
-      .mockResolvedValueOnce({ title: '完整稿', digest: '摘要', markdown: `开篇事实说明事件正在改变公开披露的边界。\n\n![原帖截图](${evidence[0]})\n\n## 披露口径正在变化\n\n${paragraphs.slice(0, 420)}\n\n![产品说明](${evidence[1]})\n\n## 代理行动的边界\n\n${paragraphs.slice(420, 850)}\n\n![治理材料](${evidence[2]})\n\n## 接下来观察什么\n\n${paragraphs.slice(850)}` });
+      .mockResolvedValueOnce({ title: '完整稿', digest: '摘要', markdown: `开篇事实说明事件正在改变公开披露的边界。\n\n![原帖截图](${evidence[0]})\n\n## 披露口径正在变化\n\n${paragraphs.slice(0, 420)}\n\n![产品说明](${evidence[1]})\n\n## 代理行动的边界\n\n${paragraphs.slice(420, 850)}\n\n![治理材料](${evidence[2]})\n\n## 接下来观察什么\n\n${paragraphs.slice(850)}\n\n![适用范围](${evidence[3]})\n\n![后续官方说明](${evidence[4]})` });
     const writer = createArticleWriter({ client: { complete } });
     const article = await writer.write({
       post: { text: '官方说明', sourceUrl: 'https://x.com/openai/status/1' },
@@ -475,6 +475,12 @@ describe('thread assembly and humanizer', () => {
       assets: evidence.map(localPath => ({ kind: 'x-post-evidence', localPath, sourceUrl: 'https://x.com/openai/status/1' })),
     });
     expect(complete).toHaveBeenCalledTimes(3);
+    for (const [request] of complete.mock.calls) {
+      expect(request.system).toContain('早鸟公众号图文写作');
+      expect(request.system).toContain('Humanizer-zh: 去除 AI 写作痕迹');
+      expect(request.system).toContain('五张是底线');
+      expect(request.images).toHaveLength(5);
+    }
     expect(editorialStructureIssues(article.markdown, 'explainer', articleVisualAssets(evidence.map(localPath => ({ kind: 'x-post-evidence', localPath }))))).toEqual([]);
   });
   it('removes Markdown emphasis and breaks article paragraphs into readable lengths', () => {
@@ -951,4 +957,3 @@ describe('cover image pipeline integration', () => {
     });
   });
 });
-

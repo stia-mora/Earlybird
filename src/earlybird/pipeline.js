@@ -5,7 +5,7 @@ import { humanize } from './humanizer.js';
 import { renderGzhMarkdown, validateGzhHtml } from './gzhRenderer.js';
 import { captureEvidence } from './evidenceCapture.js';
 import { createMediaPipeline } from './mediaPipeline.js';
-import { articleVisualAssets, createArticleWriter } from './articleWriter.js';
+import { articleVisualAssets, createArticleWriter, markdownImagePaths } from './articleWriter.js';
 import { createWeChatClient } from './wechatClient.js';
 import { createHermesNotifier } from './hermesNotifier.js';
 import { availableFixedEndVisuals } from './fixedEndVisuals.js';
@@ -15,7 +15,7 @@ import { contentStandard, createEditorialOrchestrator, reviewInputHash } from '.
 import { emptyEditorialResearch, gatherEditorialResearch, hasResearchPlan, selectEditorialResearch } from './editorialResearch.js';
 import { createEditorialXSearch } from './xResearchSearch.js';
 import { shanghaiDayRange } from './dailySummary.js';
-import { isNonemptyFile, sanitizeJsonUnicode } from './utils.js';
+import { isNonemptyFile, postUrl, sanitizeJsonUnicode } from './utils.js';
 
 const MAX_REWRITE_ATTEMPTS = 3;
 
@@ -50,14 +50,19 @@ async function collectAssets({ prisma, mediaPipeline, post, thread }) {
   const threadPostIds = new Set([post.postId, post.rawData?.id, ...thread.map(item => item?.id || item?.id_str)].filter(Boolean).map(String));
   const belongsToThread = asset => !asset.metadata?.tweetId || threadPostIds.has(String(asset.metadata.tweetId));
   const threadAssets = (collected || []).filter(belongsToThread);
-  if (!prisma?.earlyBirdAsset?.findMany) return existingAssets(threadAssets);
+  const withSources = assets => assets.map(asset => {
+    if (asset.metadata?.sourcePageUrl || !['image', 'video'].includes(asset.kind)) return asset;
+    const tweet = thread.find(item => String(item?.id || item?.id_str) === String(asset.metadata?.tweetId));
+    return { ...asset, metadata: { ...asset.metadata, sourcePageUrl: postUrl(tweet) || post.sourceUrl, sourceDomain: 'x.com', attribution: '图片来源：X 原帖附件' } };
+  });
+  if (!prisma?.earlyBirdAsset?.findMany) return withSources(await existingAssets(threadAssets));
   const stored = await prisma.earlyBirdAsset.findMany({ where: { postId: post.id, localPath: { not: null } } });
   const known = new Set(threadAssets.map(asset => asset.id || `${asset.sourceUrl}:${asset.localPath}`));
-  return existingAssets([...threadAssets, ...stored.filter(asset => belongsToThread(asset) && !known.has(asset.id || `${asset.sourceUrl}:${asset.localPath}`))]);
+  return withSources(await existingAssets([...threadAssets, ...stored.filter(asset => belongsToThread(asset) && !known.has(asset.id || `${asset.sourceUrl}:${asset.localPath}`))]));
 }
 
 function postEvidenceAsset(post, localPath) {
-  return { kind: 'x-post-evidence', localPath, sourceUrl: post.sourceUrl, metadata: { altText: `@${post.authorUsername || 'unknown'} 的 X 原帖截图` } };
+  return { kind: 'x-post-evidence', localPath, sourceUrl: post.sourceUrl, metadata: { altText: `@${post.authorUsername || 'unknown'} 的 X 原帖截图`, sourcePageUrl: post.sourceUrl, sourceDomain: 'x.com', attribution: '图片来源：X 原帖' } };
 }
 
 function articleReferences(storyPosts, assets, research = {}) {
@@ -253,12 +258,23 @@ export function createArticlePipeline({
         const qualityStoryJobs = [...storyJobs, ...selectedResearch.xEvidence.map(externalStoryJob)];
         const sourceAssets = materials.flatMap(item => item.assets);
         const evidenceAssets = materials.filter(item => item.hasEvidence).map(item => postEvidenceAsset(item.post, item.evidencePath));
+        if (triage.contentType === 'explainer') {
+          const knownPosts = new Set(materials.map(item => item.post.sourceUrl));
+          for (const item of selectedResearch.xEvidence) {
+            if (knownPosts.has(item.url) || !item.tweet) continue;
+            const post = { ...externalStoryPost(item), id: job.post.id, postId: String(item.tweet.id), rawData: item.tweet };
+            const assets = await collectAssets({ prisma, mediaPipeline, post, thread: [item.tweet] });
+            sourceAssets.push(...assets);
+            const outputPath = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', `${post.postId}-evidence.png`);
+            if (await capturePostEvidence({ evidence, post, assets, outputPath, thread: [item.tweet], translation: '', logger })) evidenceAssets.push(postEvidenceAsset(post, outputPath));
+          }
+        }
         const standard = contentStandard(triage.contentType);
         const initialVisuals = articleVisualAssets([...sourceAssets, ...evidenceAssets]);
-        const webAssets = await collectWebImages({ search: imageSearch, prisma, post: job.post, visualPlan: triage.visualPlan, needed: Math.max(0, standard.minVisuals - initialVisuals.length), logger });
+        const webAssets = await collectWebImages({ search: imageSearch, prisma, post: job.post, visualPlan: triage.visualPlan, needed: Math.max(0, standard.minVisuals - initialVisuals.length), completePlan: triage.contentType === 'explainer', existingAssets: sourceAssets, logger });
         const allAssets = [...sourceAssets, ...webAssets];
         const articleAssets = [...allAssets, ...evidenceAssets];
-        const visualAssets = articleVisualAssets(articleAssets);
+        let visualAssets = articleVisualAssets(articleAssets);
         if (visualAssets.length < standard.minVisuals) return manualReview(job, metadata, `正文可用图片仅 ${visualAssets.length} 张，${triage.contentType} 至少需要 ${standard.minVisuals} 张`);
 
         const root = materials[0];
@@ -280,10 +296,10 @@ export function createArticlePipeline({
             return manualReview(job, metadata, `自动写作未达到结构标准：${error.message}`);
           }
           await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'written', markdown: article.markdown } });
-          const polished = await humanize({ client: llmClient, markdown: article.markdown, context: { postId: job.post.postId, analysis, editorial } });
+          const polished = await humanize({ client: llmClient, markdown: article.markdown, visualAssets, context: { postId: job.post.postId, analysis, editorial } });
           const candidate = { ...article, markdown: polished.markdown };
           await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'quality_review', markdown: candidate.markdown, humanizerScore: polished.score } });
-          const quality = await editorialOrchestrator.reviewDraft({ job, article: candidate, editorial, storyPosts: qualityStoryJobs, candidates, assets: articleAssets, references, attempt });
+          const quality = await editorialOrchestrator.reviewDraft({ job, article: candidate, editorial, storyPosts: qualityStoryJobs, candidates, assets: articleAssets, references, humanizerScore: polished.score, attempt });
           metadata = metadataWithReview(metadata, editorial, quality);
           await saveReview(prisma, job, 'draft', attempt, quality, candidate.markdown);
           const hash = reviewInputHash(candidate.markdown);
@@ -295,15 +311,25 @@ export function createArticlePipeline({
             return manualReview(job, metadata, quality.issues.join('；') || '成稿审核建议增加关联内容合稿，但未找到可用关联任务');
           }
           if (quality.decision === 'manual_review' || attempt === MAX_REWRITE_ATTEMPTS || hash === lastHash) return manualReview(job, metadata, quality.issues.join('；') || (hash === lastHash ? '自动改写未产生实质变化' : '自动改写三轮后仍未通过审核'));
+          if (editorial.contentType === 'explainer' && quality.visualPlan?.length) {
+            const extraAssets = await collectWebImages({ search: imageSearch, prisma, post: job.post, visualPlan: quality.visualPlan, completePlan: true, existingAssets: allAssets, logger });
+            allAssets.push(...extraAssets);
+            articleAssets.push(...extraAssets);
+            visualAssets = articleVisualAssets(articleAssets);
+            for (const url of articleReferences(storyPosts, extraAssets, selectedResearch)) if (!references.includes(url)) references.push(url);
+          }
           lastHash = hash;
           article = candidate;
         }
         if (!article || metadata.review?.decision !== 'pass') return manualReview(job, metadata, '审核未返回可发布结论');
 
+        const usedPaths = new Set(markdownImagePaths(article.markdown).map(path => path.replace(/\\/g, '/')));
+        const usedVisuals = visualAssets.filter(asset => usedPaths.has(asset.localPath.replace(/\\/g, '/')));
+        references.splice(0, references.length, ...articleReferences(storyPosts, usedVisuals, selectedResearch));
         const endVisuals = await availableFixedEndVisuals();
         const assetUrls = new Map();
         if (!wechatClient) {
-          const html = await renderGzhMarkdown(article.markdown, { title: article.title, digest: article.digest, contentType: editorial.contentType, references, endVisuals, imageAttributions: imageAttributions(visualAssets, assetUrls) });
+          const html = await renderGzhMarkdown(article.markdown, { title: article.title, digest: article.digest, contentType: editorial.contentType, references, endVisuals, imageAttributions: imageAttributions(usedVisuals, assetUrls) });
           await validateGzhHtml(html);
           if (relatedJobs.length) await markMerged(job, relatedJobs);
           return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html, markdown: article.markdown, metadata } });
@@ -311,10 +337,10 @@ export function createArticlePipeline({
         let cover;
         try { cover = await coverImageGenerator.generate({ postId: job.post.postId, title: article.title, digest: article.digest, analysis, editorial, previous: metadata.cover }); }
         catch (error) { logger.warn?.('EarlyBird cover generation failed; using a verified article visual', job.id, error.message); }
-        const thumbPath = cover?.localPath || visualAssets[0]?.localPath;
+        const thumbPath = cover?.localPath || usedVisuals[0]?.localPath;
         if (!thumbPath) return manualReview(job, metadata, '没有可用于公众号封面的已验证图片');
         const thumb = await wechatClient.uploadPermanentMaterial(thumbPath, 'thumb');
-        for (const asset of [...visualAssets, ...endVisuals]) {
+        for (const asset of [...usedVisuals, ...endVisuals]) {
           const uploaded = await wechatClient.uploadArticleImage(asset.localPath);
           if (uploaded.url) assetUrls.set(asset.localPath, uploaded.url);
           if (asset.assetId) await prisma.earlyBirdAsset.update({ where: { id: asset.assetId }, data: { wechatUrl: uploaded.url, status: 'uploaded' } });
@@ -326,7 +352,7 @@ export function createArticlePipeline({
         }, article.markdown);
         const renderedEndVisuals = endVisuals.map(asset => ({ ...asset, src: assetUrls.get(asset.localPath) || asset.localPath }));
         metadata = { ...metadata, cover: cover || { status: 'source-fallback', reason: 'cover image generation failed' } };
-        const html = await renderGzhMarkdown(markdownForRender, { title: article.title, digest: article.digest, contentType: editorial.contentType, references, endVisuals: renderedEndVisuals, imageAttributions: imageAttributions(visualAssets, assetUrls) });
+        const html = await renderGzhMarkdown(markdownForRender, { title: article.title, digest: article.digest, contentType: editorial.contentType, references, endVisuals: renderedEndVisuals, imageAttributions: imageAttributions(usedVisuals, assetUrls) });
         await validateGzhHtml(html);
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html, markdown: article.markdown, metadata } });
         const draft = await wechatClient.addDraft({ title: article.title.slice(0, 64), author: process.env.WECHAT_AUTHOR || '', digest: article.digest?.slice(0, 120), content: html, content_source_url: '', thumb_media_id: thumb?.media_id || '' });

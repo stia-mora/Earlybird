@@ -163,11 +163,13 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
       }
       const image = item.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       if (image) {
-        html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(sanitizeEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' '))}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
+        const caption = sanitizeEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' ');
+        html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(caption)}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
+        if (contentType === 'explainer' && caption) html += `<p style="font-size:13px;color:#71717A;line-height:1.6;margin:-12px 0 20px;"><span leaf="">${escapeHtml(fullWidthPunctuation(caption))}</span></p>`;
         const attribution = imageAttribution(image[2], imageAttributions);
         if (attribution?.sourceUrl) {
           const label = plainText(attribution.label || attribution.sourceDomain || '图片来源');
-          html += `<p style="font-size:12px;color:#A1A1AA;line-height:1.6;margin:-12px 0 20px;"><span leaf="">${escapeHtml(label)}：${escapeHtml(attribution.sourceUrl)}</span></p>`;
+          html += `<p style="font-size:12px;color:#71717A;line-height:1.6;margin:${contentType === 'explainer' && caption ? '-14px' : '-12px'} 0 20px;word-break:break-all;"><span leaf="">${escapeHtml(label)}：${escapeHtml(attribution.sourceUrl)}</span></p>`;
         }
         continue;
       }
