@@ -31,7 +31,7 @@
  */
 
 import { resolveOperation } from './queryIds.js';
-import { USER_AGENT_STRINGS } from '../../../client/auth/userAgents.generated.js';
+import { USER_AGENT_STRINGS } from './userAgents.js';
 import {
   UPSTREAM,
   OPERATIONS as UPSTREAM_OPERATIONS,

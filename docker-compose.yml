@@ -1,8 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# XActions — Docker Compose (Full Stack)
-# Runs: API + Worker + PostgreSQL + Redis
-# Usage: docker compose up -d
-# by nichxbt
+# EarlyBird — Docker Compose
+# Autonomous AI Tech News Pipeline powered by Pi Agent
+# Runs: EarlyBird Worker + PostgreSQL + Redis
 # ═══════════════════════════════════════════════════════════════════════════════
 
 services:
@@ -13,15 +12,15 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: xactions
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xactions_dev_password}
-      POSTGRES_DB: xactions
+      POSTGRES_USER: earlybird
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-earlybird_dev_password}
+      POSTGRES_DB: earlybird
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U xactions"]
+      test: ["CMD-SHELL", "pg_isready -U earlybird"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -44,115 +43,16 @@ services:
       retries: 5
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # XActions API Server
+  # EarlyBird Autonomous Worker (X -> WeChat Official Account Pipeline)
   # ─────────────────────────────────────────────────────────────────────────────
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - "${PORT:-3001}:3001"
-    environment:
-      NODE_ENV: production
-      PORT: 3001
-      DATABASE_URL: postgresql://xactions:${POSTGRES_PASSWORD:-xactions_dev_password}@postgres:5432/xactions?schema=public
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
-      SESSION_SECRET: ${SESSION_SECRET:-$(openssl rand -hex 32)}
-      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
-      PUPPETEER_HEADLESS: "true"
-      PUPPETEER_NO_SANDBOX: "true"
-      X_COOKIES: ${X_COOKIES:-}
-      EARLYBIRD_X_COOKIES_FILE: ${EARLYBIRD_X_COOKIES_FILE:-}
-      EARLYBIRD_X_PROXY: ${EARLYBIRD_X_PROXY:-}
-      EARLYBIRD_LLM_API_KEY: ${EARLYBIRD_LLM_API_KEY:-}
-      EARLYBIRD_LLM_BASE_URL: ${EARLYBIRD_LLM_BASE_URL:-https://api.openai.com/v1}
-      EARLYBIRD_LLM_MODEL: ${EARLYBIRD_LLM_MODEL:-gpt-4o-mini}
-      EARLYBIRD_ARTICLE_MAX_TOKENS: ${EARLYBIRD_ARTICLE_MAX_TOKENS:-6000}
-      EARLYBIRD_LLM_FALLBACK_API_KEY: ${EARLYBIRD_LLM_FALLBACK_API_KEY:-}
-      EARLYBIRD_LLM_FALLBACK_BASE_URL: ${EARLYBIRD_LLM_FALLBACK_BASE_URL:-}
-      EARLYBIRD_LLM_FALLBACK_MODEL: ${EARLYBIRD_LLM_FALLBACK_MODEL:-}
-      EARLYBIRD_TAVILY_API_KEY: ${EARLYBIRD_TAVILY_API_KEY:-}
-      EARLYBIRD_COVER_IMAGE_API_KEY: ${EARLYBIRD_COVER_IMAGE_API_KEY:-}
-      EARLYBIRD_COVER_IMAGE_BASE_URL: ${EARLYBIRD_COVER_IMAGE_BASE_URL:-}
-      EARLYBIRD_COVER_IMAGE_MODEL: ${EARLYBIRD_COVER_IMAGE_MODEL:-gemini-3.1-flash-image}
-      EARLYBIRD_COVER_IMAGE_FALLBACK_API_KEY: ${EARLYBIRD_COVER_IMAGE_FALLBACK_API_KEY:-}
-      EARLYBIRD_COVER_IMAGE_FALLBACK_BASE_URL: ${EARLYBIRD_COVER_IMAGE_FALLBACK_BASE_URL:-}
-      EARLYBIRD_COVER_IMAGE_FALLBACK_MODEL: ${EARLYBIRD_COVER_IMAGE_FALLBACK_MODEL:-grok-imagine-image-2.0}
-      WECHAT_APP_ID: ${WECHAT_APP_ID:-}
-      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:-}
-      WECHAT_AUTHOR: ${WECHAT_AUTHOR:-}
-      EARLYBIRD_PUBLIC_MEDIA_URL: ${EARLYBIRD_PUBLIC_MEDIA_URL:-}
-      EARLYBIRD_MEDIA_DIR: /app/data/earlybird/media
-      EARLYBIRD_HOST_MEDIA_DIR: "${EARLYBIRD_HOST_MEDIA_DIR:-E:/Group-projects/EarlyBird-Pulse/XActions/data/earlybird/media}"
-      EARLYBIRD_THREAD_WAIT_MS: ${EARLYBIRD_THREAD_WAIT_MS:-90000}
-      EARLYBIRD_THREAD_TIMEOUT_MS: ${EARLYBIRD_THREAD_TIMEOUT_MS:-60000}
-      EARLYBIRD_STT_API_KEY: ${EARLYBIRD_STT_API_KEY:-}
-      EARLYBIRD_STT_MODEL: ${EARLYBIRD_STT_MODEL:-gpt-4o-mini-transcribe}
-      EARLYBIRD_HERMES_RELAY_URL: ${EARLYBIRD_HERMES_RELAY_URL:-http://host.docker.internal:8767/notify}
-      EARLYBIRD_HERMES_RELAY_TOKEN_FILE: /run/secrets/earlybird-hermes-relay-token
-      EARLYBIRD_HERMES_TIMEOUT_MS: ${EARLYBIRD_HERMES_TIMEOUT_MS:-45000}
-    volumes:
-      - ./data/earlybird/media:/app/data/earlybird/media
-      - ./data/earlybird/x.com_cookies.txt:/run/secrets/earlybird-x-cookies.txt:ro
-      - ./data/earlybird/hermes-relay.token:/run/secrets/earlybird-hermes-relay-token:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: >
-      sh -c "npx prisma migrate deploy && node api/server.js"
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # XActions Background Worker (Job Queue Processor)
-  # ─────────────────────────────────────────────────────────────────────────────
-  worker:
+  earlybird:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://xactions:${POSTGRES_PASSWORD:-xactions_dev_password}@postgres:5432/xactions?schema=public
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
-      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
-      PUPPETEER_HEADLESS: "true"
-      PUPPETEER_NO_SANDBOX: "true"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: ["node", "api/services/jobQueue.js"]
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"process.exit(0)\""]
-      interval: 30s
-      timeout: 10s
-      start_period: 10s
-      retries: 3
-
-  # Independent EarlyBird X -> WeChat draft worker
-  earlybird-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://xactions:${POSTGRES_PASSWORD:-xactions_dev_password}@postgres:5432/xactions?schema=public
+      DATABASE_URL: postgresql://earlybird:${POSTGRES_PASSWORD:-earlybird_dev_password}@postgres:5432/earlybird?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
       X_COOKIES: ${X_COOKIES:-}
@@ -206,8 +106,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      api:
         condition: service_healthy
     command: ["node", "src/earlybird/worker.js"]
     healthcheck:

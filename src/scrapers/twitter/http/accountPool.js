@@ -32,7 +32,46 @@ import Database from 'better-sqlite3';
 import { TwitterHttpClient } from './client.js';
 import { AuthError, RateLimitError, TwitterApiError } from './errors.js';
 import { resolveCacheDir } from './queryIds.js';
-import { parseCookieInput } from '../../../client/auth/cookieImport.js';
+
+export function parseCookieInput(text) {
+  if (!text) return [];
+  const trimmed = String(text).trim();
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const cookies = Array.isArray(parsed) ? parsed : (parsed.cookies || []);
+      return cookies
+        .map((c) => ({ name: c.name || c.Name, value: c.value || c.Value }))
+        .filter((c) => Boolean(c.name));
+    } catch {}
+  }
+
+  const lines = trimmed.split(/[\r\n]+/);
+  const result = [];
+  for (const line of lines) {
+    const l = line.trim();
+    if (!l || l.startsWith('#')) continue;
+    if (l.includes('\t')) {
+      const parts = l.split('\t');
+      if (parts.length >= 7) {
+        result.push({ name: parts[5], value: parts[6] });
+        continue;
+      }
+    }
+    for (const pair of l.split(';')) {
+      const idx = pair.indexOf('=');
+      if (idx > 0) {
+        result.push({
+          name: pair.slice(0, idx).trim(),
+          value: pair.slice(idx + 1).trim(),
+        });
+      }
+    }
+  }
+  return result;
+}
 
 const DB_FILENAME = 'accounts.db';
 
