@@ -133,10 +133,14 @@ export function normalizeEditorialDecision(raw, { job, candidates = [], phase = 
     if (decision === 'merge') decision = 'rewrite';
     issues.unshift('事件合稿至少需要两条可追溯的来源内容');
   }
-  if (phase === 'draft' && decision === 'pass' && issues.length) decision = 'rewrite';
-  if (phase === 'draft' && decision === 'pass' && score(raw?.qualityScore, 0) < 80) {
-    decision = 'rewrite';
-    issues.unshift('质量评分未达到自动通过阈值');
+  if (phase === 'draft') {
+    if (score(raw?.qualityScore, 0) < 85) {
+      if (decision === 'pass') decision = 'rewrite';
+      issues.unshift('质量评分未达到自动通过严审阈值（需>=85）');
+    }
+    if (decision === 'pass' && issues.length) {
+      decision = 'rewrite';
+    }
   }
   if (phase === 'triage' && ['explainer', 'event'].includes(contentType) && !researchPlan.xQueries.length && !researchPlan.webQueries.length) {
     researchPlan = defaultResearchPlan(job);
@@ -145,7 +149,7 @@ export function normalizeEditorialDecision(raw, { job, candidates = [], phase = 
   return {
     decision,
     contentType,
-    qualityScore: score(raw?.qualityScore, decision === 'pass' ? 85 : 60),
+    qualityScore: score(raw?.qualityScore, decision === 'pass' ? 88 : 60),
     issues: arrayOfText(issues),
     rewriteInstructions,
     relatedJobIds: candidateIds,
@@ -167,6 +171,30 @@ export function draftQualityIssues({ markdown, contentType, storyPosts = [], ass
   if (contentType === 'event' && new Set(references).size < standard.minStories) issues.push('事件合稿至少需要两条来源内容');
   if (!references.length) issues.push('缺少可核查的来源链接');
   if (contentType === 'explainer' && Number.isFinite(humanizerScore) && humanizerScore < 45) issues.push('去 AI 味评分未达到 45／50，需要实质改写');
+
+  // Check for untranslated raw English paragraphs in markdown
+  const md = String(markdown || '');
+  const lines = md.split('\n').map(l => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    if (line.startsWith('![') || line.startsWith('#') || line.startsWith('http')) continue;
+    const englishLen = (line.match(/[A-Za-z0-9\s,.'":;!?-]/g) || []).length;
+    const chineseLen = (line.match(/[\u4e00-\u9fa5]/g) || []).length;
+    if (englishLen > 120 && chineseLen === 0) {
+      issues.push('正文包含未翻译的生肉外文段落，必须补充中文翻译对照');
+      break;
+    }
+  }
+
+  // Check if foreign post evidence is used without corresponding Chinese translation/context in markdown
+  for (const post of storyPosts) {
+    const text = post?.text || '';
+    const isForeign = text.length > 50 && (text.match(/[\u4e00-\u9fa5]/g) || []).length < 5;
+    if (isForeign && !md.includes('翻译') && !md.includes('表示') && !md.includes('指出') && !md.includes('写道') && !md.includes('说明')) {
+      issues.push(`外文原帖（@${post.authorUsername || 'author'}）缺少中文转述或翻译说明`);
+      break;
+    }
+  }
+
   return [...new Set(issues)];
 }
 

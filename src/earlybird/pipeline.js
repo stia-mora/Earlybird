@@ -83,9 +83,29 @@ function videoPosterPath(assets) {
   return video?.metadata?.posterPath || video?.metadata?.keyframes?.find(Boolean);
 }
 
-async function capturePostEvidence({ evidence, post, assets, outputPath, thread, translation, logger }) {
+async function ensurePostTranslation({ client, post, translation }) {
+  if (translation?.trim()) return translation.trim();
+  const text = (post?.text || post?.rawData?.text || post?.rawData?.full_text || '').trim();
+  if (!text) return '';
+  const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+  if (chineseChars >= 10 || (text.length > 0 && chineseChars / text.length > 0.3)) return '';
+  if (!client) return '';
   try {
-    await evidence({ tweetUrl: post.sourceUrl, postId: post.postId, translation, mediaPosterPath: videoPosterPath(assets), outputPath, thread });
+    const res = await client.complete({
+      system: '你是专业科技编译。将以下推文准确翻译为中文，语言精炼自然，保留人名、产品名和版本号。只返回中文译文，不输出任何解释。',
+      user: text,
+      maxOutputTokens: 300,
+    });
+    return (res?.text || res?.translation || (typeof res === 'string' ? res : '')).trim();
+  } catch {
+    return '';
+  }
+}
+
+async function capturePostEvidence({ evidence, post, assets, outputPath, thread, translation, client, logger }) {
+  try {
+    const effectiveTranslation = translation || await ensurePostTranslation({ client, post, translation });
+    await evidence({ tweetUrl: post.sourceUrl, postId: post.postId, translation: effectiveTranslation, mediaPosterPath: videoPosterPath(assets), outputPath, thread });
     return true;
   } catch (error) {
     logger.warn?.('EarlyBird X evidence was unavailable; continuing without a screenshot', post.postId, error.message);
@@ -140,7 +160,7 @@ async function candidateJobs(prisma, job, { dailyReview = false, now = new Date(
   });
 }
 
-async function buildStoryMaterial({ storyJob, prisma, scraperFactory, mediaPipeline, evidence, logger }) {
+async function buildStoryMaterial({ storyJob, prisma, scraperFactory, mediaPipeline, evidence, client, logger }) {
   const scraper = await scraperFactory(storyJob.source);
   const thread = await assembleThread({
     scraper, post: storyJob.post, waitMs: Math.max(0, configuredNumber('EARLYBIRD_THREAD_WAIT_MS', 90000)),
@@ -149,7 +169,7 @@ async function buildStoryMaterial({ storyJob, prisma, scraperFactory, mediaPipel
   await prisma.earlyBirdPost.update({ where: { id: storyJob.postId }, data: { threadData: thread } });
   const assets = await collectAssets({ prisma, mediaPipeline, post: storyJob.post, thread });
   const evidencePath = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', `${storyJob.post.postId}-evidence.png`);
-  const hasEvidence = await capturePostEvidence({ evidence, post: storyJob.post, assets, outputPath: evidencePath, thread, translation: '', logger });
+  const hasEvidence = await capturePostEvidence({ evidence, post: storyJob.post, assets, outputPath: evidencePath, thread, translation: '', client, logger });
   return { ...storyJob, thread, assets, evidencePath, hasEvidence };
 }
 
@@ -302,7 +322,7 @@ export function createArticlePipeline({
           }
         }
         const materials = [];
-        for (const storyJob of storyJobs) materials.push(await buildStoryMaterial({ storyJob, prisma, scraperFactory, mediaPipeline, evidence, logger }));
+        for (const storyJob of storyJobs) materials.push(await buildStoryMaterial({ storyJob, prisma, scraperFactory, mediaPipeline, evidence, client: llmClient, logger }));
         const storyPosts = [...materials.map(item => item.post), ...selectedResearch.xEvidence.map(externalStoryPost)];
         const qualityStoryJobs = [...storyJobs, ...selectedResearch.xEvidence.map(externalStoryJob)];
         const sourceAssets = materials.flatMap(item => item.assets);
@@ -315,7 +335,7 @@ export function createArticlePipeline({
             const assets = await collectAssets({ prisma, mediaPipeline, post, thread: [item.tweet] });
             sourceAssets.push(...assets);
             const outputPath = join(process.env.EARLYBIRD_MEDIA_DIR || './data/earlybird/media', `${post.postId}-evidence.png`);
-            if (await capturePostEvidence({ evidence, post, assets, outputPath, thread: [item.tweet], translation: '', logger })) evidenceAssets.push(postEvidenceAsset(post, outputPath));
+            if (await capturePostEvidence({ evidence, post, assets, outputPath, thread: [item.tweet], translation: '', client: llmClient, logger })) evidenceAssets.push(postEvidenceAsset(post, outputPath));
           }
         }
         const standard = contentStandard(triage.contentType);
@@ -329,7 +349,7 @@ export function createArticlePipeline({
         const root = materials[0];
         const analysisPost = { ...job.post.rawData, text: job.post.text, storyPosts: storyPosts.map(item => ({ author: item.authorUsername, createdAt: item.createdAt, url: item.sourceUrl, text: item.text })) };
         const analysis = await analyze({ client: llmClient, post: analysisPost, thread: root.thread, assets: allAssets, evidencePath: root.hasEvidence ? root.evidencePath : undefined });
-        if (root.hasEvidence) await capturePostEvidence({ evidence, post: job.post, assets: root.assets, outputPath: root.evidencePath, thread: root.thread, translation: analysis.translation, logger });
+        if (root.hasEvidence) await capturePostEvidence({ evidence, post: job.post, assets: root.assets, outputPath: root.evidencePath, thread: root.thread, translation: analysis.translation, client: llmClient, logger });
         const references = articleReferences(storyPosts, allAssets, selectedResearch);
         const editorial = { ...triage, publish: true };
         metadata = { ...metadata, analysis, research: { citations: selectedResearch.citations, xEvidence: selectedResearch.xEvidence, queries: research.plan, failures: research.failures } };

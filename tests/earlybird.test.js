@@ -621,6 +621,52 @@ describe('controlled evidence', () => {
     expect(() => assertTweetEvidence({ pageText: 'normal', articleText: '' })).toThrow(/empty/i);
     expect(() => assertTweetEvidence({ pageText: 'normal', articleText: 'target X post' })).not.toThrow();
   });
+  it('pipeline automatically translates English post before capturing evidence screenshot', async () => {
+    const originalThreadWait = process.env.EARLYBIRD_THREAD_WAIT_MS;
+    process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
+    try {
+      const mockEvidence = vi.fn(async () => ({}));
+      const mockClient = {
+        complete: vi.fn(async () => '这是关于文本水印的中文翻译。'),
+      };
+      const post = { id: 'p-en', postId: '200', sourceUrl: 'https://x.com/openai/status/200', text: 'Watermarks have limits. They are often undetectable.' };
+      const job = { id: 'j-en', post, source: { handle: 'openai' }, metadata: {} };
+      const prisma = {
+        earlyBirdArticleJob: {
+          findUnique: vi.fn(async () => job),
+          update: vi.fn(async () => job),
+        },
+        earlyBirdPost: { update: vi.fn(async () => post) },
+        earlyBirdAsset: { findMany: vi.fn(async () => []) },
+        earlyBirdDraft: { create: vi.fn(async () => ({})) },
+      };
+      const pipeline = createArticlePipeline({
+        prisma,
+        evidence: mockEvidence,
+        llmClient: mockClient,
+        scraperFactory: async () => ({ scrapeFullThread: vi.fn(async () => []) }),
+        criticAgent: {
+          screen: vi.fn(async () => ({ newsworthy: 9, hasConcreteFact: true })),
+          triage: vi.fn(async () => ({ decision: 'pass', contentType: 'brief', visualPlan: [] })),
+          reviewDraft: vi.fn(async () => ({ decision: 'pass', contentType: 'brief', qualityScore: 92, issues: [] })),
+        },
+        authorAgent: {
+          write: vi.fn(async () => ({
+            title: '水印技术解析',
+            markdown: '![证据图](data/200-evidence.png)\n\n官方明确表示：这是关于文本水印的中文翻译。文本水印技术细节已经公开。',
+          })),
+        },
+        humanizer: { humanize: vi.fn(async ({ markdown }) => ({ markdown, score: 50 })) },
+      });
+
+      await pipeline.process(job.id);
+      expect(mockEvidence).toHaveBeenCalledWith(expect.objectContaining({
+        translation: '这是关于文本水印的中文翻译。',
+      }));
+    } finally {
+      process.env.EARLYBIRD_THREAD_WAIT_MS = originalThreadWait;
+    }
+  });
 });
 
 describe('editorial article pipeline', () => {

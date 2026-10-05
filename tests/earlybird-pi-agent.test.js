@@ -275,6 +275,59 @@ describe('EarlyBird Pi Agent Architecture', () => {
       expect(review.issues).toContain('第2段断言融资100亿缺少任何信源支撑');
       expect(review.rewriteInstructions).toContain('删除关于100亿融资');
     });
+
+    it('critic strictly rejects draft with untranslated raw foreign text', async () => {
+      const mockClient = {
+        complete: vi.fn(async () => ({
+          decision: 'pass',
+          qualityScore: 90,
+          issues: [],
+          title: '测试标题',
+        })),
+      };
+
+      const critic = createCriticAgent({ client: mockClient });
+      const rawEnglishWall = 'Watermarks have limits. They are often undetectable, especially in short passages. Rewriting or translating text can completely remove the watermark from any generated file without leaving trace.';
+      const review = await critic.reviewDraft({
+        job: { id: 'j-crit-3', post: { postId: 'p-3', text: 'Watermarks have limits.' } },
+        article: {
+          title: '测试标题',
+          markdown: `![原帖截图](data/evidence.png)\n\n这是一个关于水印的说明。\n\n${rawEnglishWall}\n\n后文继续分析。`,
+        },
+        editorial: { contentType: 'brief' },
+        assets: [{ kind: 'image', localPath: 'data/evidence.png' }],
+        references: ['https://official.example/verified'],
+      });
+
+      expect(review.decision).toBe('rewrite');
+      expect(review.issues.some(i => i.includes('未翻译') || i.includes('外文'))).toBe(true);
+    });
+
+    it('critic enforces strict quality threshold >= 85 and forces rewrite when score is under 85', async () => {
+      const mockClient = {
+        complete: vi.fn(async () => ({
+          decision: 'pass',
+          qualityScore: 82, // under the strict 85 threshold!
+          issues: [],
+          title: '合格但不够优秀的标题',
+        })),
+      };
+
+      const critic = createCriticAgent({ client: mockClient });
+      const review = await critic.reviewDraft({
+        job: { id: 'j-crit-4', post: { postId: 'p-4', text: 'Some tech announcement' } },
+        article: {
+          title: '合格但不够优秀的标题',
+          markdown: '![原帖截图](data/evidence.png)\n\n开篇直接指出：新模型跑分直接暴涨了30%。这是技术演进的关键一步，后续细节正在逐步公开中。',
+        },
+        editorial: { contentType: 'brief' },
+        assets: [{ kind: 'image', localPath: 'data/evidence.png' }],
+        references: ['https://official.example/verified'],
+      });
+
+      expect(review.decision).toBe('rewrite');
+      expect(review.issues.some(i => i.includes('质量评分未达到自动通过严审阈值'))).toBe(true);
+    });
   });
 
   describe('Full Pipeline Integration with Pi Agent', () => {

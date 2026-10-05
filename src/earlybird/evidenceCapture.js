@@ -40,6 +40,8 @@ async function hideOverlappingPageChrome(card) {
   });
 }
 
+const MEDIA_CONTAINER_SELECTOR = '[data-testid="videoPlayer"], [data-testid="videoComponent"], [data-testid="tweetPhoto"], [data-testid="card.layoutLarge.media"], [data-testid="card.wrapper"], div[aria-label*="video" i]';
+
 async function addInlineTranslation(card, translation) {
   if (!translation?.trim()) return;
   await card.evaluate((element, value) => {
@@ -47,30 +49,68 @@ async function addInlineTranslation(card, translation) {
     if (!text || element.querySelector('[data-earlybird-translation="true"]')) return;
     const block = document.createElement('div');
     block.dataset.earlybirdTranslation = 'true';
-    block.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid rgb(207,217,222);font-size:15px;line-height:1.45;color:rgb(15,20,25);white-space:pre-wrap;';
-    block.textContent = value;
+    block.style.cssText = 'margin-top:10px;padding:8px 12px;background:rgba(239,243,244,0.6);border-left:3px solid rgb(29,155,240);border-radius:4px;font-size:15px;line-height:1.45;color:rgb(15,20,25);white-space:pre-wrap;';
+    const tag = document.createElement('div');
+    tag.style.cssText = 'font-size:12px;font-weight:700;color:rgb(29,155,240);margin-bottom:4px;letter-spacing:0.5px;';
+    tag.textContent = '中文翻译：';
+    block.appendChild(tag);
+    const content = document.createElement('div');
+    content.textContent = value;
+    block.appendChild(content);
     text.insertAdjacentElement('afterend', block);
   }, translation.trim());
 }
 
-async function waitForTweetVideoFrame(card) {
-  const hasVideo = await card.$('[data-testid="videoPlayer"]');
-  if (!hasVideo) return;
-  await hasVideo.dispose().catch(() => {});
-  const ready = await card.evaluate(async element => {
+async function waitForTweetVideoFrame(card, { hasPoster = false } = {}) {
+  const hasMedia = await card.$(MEDIA_CONTAINER_SELECTOR);
+  if (!hasMedia) return;
+  await hasMedia.dispose().catch(() => {});
+  const ready = await card.evaluate(async (element, allowPoster) => {
     element.scrollIntoView({ block: 'center' });
-    const video = element.querySelector('[data-testid="videoPlayer"] video');
-    if (!video) return false;
-    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return true;
-    await Promise.race([
-      new Promise(resolve => video.addEventListener('loadeddata', () => resolve(true), { once: true })),
-      new Promise(resolve => video.addEventListener('canplay', () => resolve(true), { once: true })),
-      new Promise(resolve => setTimeout(resolve, 12000)),
-    ]);
-    return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
-  });
+
+    // Wait for all img elements in card to complete loading
+    const images = Array.from(element.querySelectorAll('img'));
+    await Promise.all(images.map(img => {
+      if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+      return new Promise(resolve => {
+        img.addEventListener('load', () => resolve(), { once: true });
+        img.addEventListener('error', () => resolve(), { once: true });
+        setTimeout(resolve, 8000);
+      });
+    }));
+
+    if (allowPoster) return true;
+
+    // Check video readiness
+    const video = element.querySelector('video');
+    const posterImg = element.querySelector('[data-testid="videoPlayer"] img, [data-testid="videoComponent"] img, [data-testid="card.layoutLarge.media"] img');
+    if (posterImg && posterImg.complete && posterImg.naturalWidth > 0) return true;
+    if (video) {
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return true;
+      await Promise.race([
+        new Promise(resolve => video.addEventListener('loadeddata', () => resolve(true), { once: true })),
+        new Promise(resolve => video.addEventListener('canplay', () => resolve(true), { once: true })),
+        new Promise(resolve => setTimeout(resolve, 12000)),
+      ]);
+      return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    }
+
+    // Check if media container is rendered as an empty/unloaded box
+    const mediaContainer = element.querySelector(
+      '[data-testid="videoPlayer"], [data-testid="videoComponent"], [data-testid="card.layoutLarge.media"]'
+    );
+    if (mediaContainer) {
+      const box = mediaContainer.getBoundingClientRect();
+      if (box.width > 80 && box.height > 60) {
+        const loadedImg = Array.from(mediaContainer.querySelectorAll('img')).some(i => i.complete && i.naturalWidth > 0);
+        if (!loadedImg && !video) return false;
+      }
+    }
+
+    return true;
+  }, hasPoster);
   if (ready) return;
-  if (!ready) throw new Error('X post video did not render a preview frame; evidence screenshot was not created');
+  throw new Error('X post video did not render a preview frame; evidence screenshot was not created');
 }
 
 async function compositeVideoFrame({ browser, raw, cardBox, videoBox, mediaPosterPath, outputPath }) {
@@ -155,12 +195,12 @@ export async function captureEvidence({ tweetUrl, postId, translation = '', show
     await expandTweetCard(shot);
     if (showTranslation) await addInlineTranslation(shot, translation);
     await shot.evaluate(element => element.scrollIntoView({ block: 'start' }));
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 300));
     await hideOverlappingPageChrome(shot);
-    if (!mediaPosterPath) await waitForTweetVideoFrame(shot);
+    await waitForTweetVideoFrame(shot, { hasPoster: Boolean(mediaPosterPath) });
     const [cardBox, video] = await Promise.all([
       shot.boundingBox(),
-      shot.$('[data-testid="videoPlayer"], [data-testid="tweetPhoto"]'),
+      shot.$(MEDIA_CONTAINER_SELECTOR),
     ]);
     if (!cardBox) throw new Error('X post card could not be measured; evidence screenshot was not created');
     const videoBox = video ? await video.boundingBox() : null;
