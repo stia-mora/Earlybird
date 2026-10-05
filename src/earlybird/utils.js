@@ -72,6 +72,16 @@ export function jsonParse(value, fallback = null) {
   try { return JSON.parse(value); } catch { return fallback; }
 }
 
+export function extractJson(text) {
+  if (!text) return null;
+  const value = String(text).trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+  try { return JSON.parse(value); } catch {
+    const match = value.match(/\{[\s\S]*\}/);
+    if (match) { try { return JSON.parse(match[0]); } catch {} }
+    return null;
+  }
+}
+
 export function sanitizeUnicode(value) {
   const text = String(value ?? '');
   let result = '';

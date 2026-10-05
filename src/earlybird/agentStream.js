@@ -33,7 +33,7 @@ function formatMessagesForLlm(messages) {
           arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments || {}),
         },
       }));
-      const item = { role: 'assistant', content: text || null };
+      const item = { role: 'assistant', content: text || (toolCalls.length > 0 ? null : '') };
       if (toolCalls.length > 0) item.tool_calls = toolCalls;
       formatted.push(item);
     } else if (msg.role === 'toolResult') {
@@ -62,6 +62,24 @@ function formatToolsForLlm(tools) {
   }));
 }
 
+function emitAssistantMessage(stream, assistantMsg) {
+  stream.push({ type: 'start', partial: assistantMsg });
+  let idx = 0;
+  for (const item of assistantMsg.content || []) {
+    if (item.type === 'text') {
+      stream.push({ type: 'text_start', contentIndex: idx, partial: assistantMsg });
+      stream.push({ type: 'text_delta', contentIndex: idx, delta: item.text, partial: assistantMsg });
+      stream.push({ type: 'text_end', contentIndex: idx, content: item.text, partial: assistantMsg });
+    } else if (item.type === 'toolCall') {
+      stream.push({ type: 'toolcall_start', contentIndex: idx, partial: assistantMsg });
+      stream.push({ type: 'toolcall_delta', contentIndex: idx, delta: '', partial: assistantMsg });
+      stream.push({ type: 'toolcall_end', contentIndex: idx, toolCall: item, partial: assistantMsg });
+    }
+    idx += 1;
+  }
+  stream.end(assistantMsg);
+}
+
 /**
  * Creates a Pi Agent stream function compatible with OpenAI chat completions and EarlyBird clients.
  */
@@ -74,7 +92,7 @@ export function createPiStreamFn({
   timeoutMs = 120000,
   logger = console,
 } = {}) {
-  return async function streamFn(requestedModel, context) {
+  return async function streamFn(requestedModel, context, options = {}) {
     const stream = createAssistantMessageEventStream();
     const effectiveModelId = requestedModel?.id || model;
 
@@ -103,19 +121,30 @@ export function createPiStreamFn({
             userMsg = `${baseText}\n\n${toolSummary}`;
           }
 
-          const response = await client.complete({ system: systemMsg, user: userMsg });
+          let effectiveSystem = systemMsg;
+          if (tools && tools.length > 0 && !systemMsg.includes('【可用工具】')) {
+            effectiveSystem += `\n\n【可用工具列表】\n${JSON.stringify(tools, null, 2)}\n若需调用工具，请返回 JSON 包含 tool_calls 数组：[{ "name": "工具名", "arguments": { ... } }]。`;
+          }
+
+          const response = await client.complete({ system: effectiveSystem, user: userMsg, tools });
           const content = [];
 
           if (response?.tool_calls || response?.toolCalls) {
             const rawCalls = response.tool_calls || response.toolCalls;
             for (const tc of rawCalls) {
+              let parsedArgs = {};
+              try {
+                parsedArgs = typeof tc.function?.arguments === 'string'
+                  ? JSON.parse(tc.function.arguments)
+                  : (tc.function?.arguments || tc.arguments || {});
+              } catch {
+                parsedArgs = { raw: tc.function?.arguments || tc.arguments };
+              }
               content.push({
                 type: 'toolCall',
                 id: tc.id || `call_${Date.now()}`,
                 name: tc.function?.name || tc.name,
-                arguments: typeof tc.function?.arguments === 'string'
-                  ? JSON.parse(tc.function.arguments)
-                  : (tc.function?.arguments || tc.arguments || {}),
+                arguments: parsedArgs,
               });
             }
           }
@@ -136,21 +165,7 @@ export function createPiStreamFn({
             content,
           };
 
-          stream.push({ type: 'start', partial: assistantMsg });
-          let idx = 0;
-          for (const item of content) {
-            if (item.type === 'text') {
-              stream.push({ type: 'text_start', contentIndex: idx, partial: assistantMsg });
-              stream.push({ type: 'text_delta', contentIndex: idx, delta: item.text, partial: assistantMsg });
-              stream.push({ type: 'text_end', contentIndex: idx, content: item.text, partial: assistantMsg });
-            } else if (item.type === 'toolCall') {
-              stream.push({ type: 'toolcall_start', contentIndex: idx, partial: assistantMsg });
-              stream.push({ type: 'toolcall_delta', contentIndex: idx, delta: '', partial: assistantMsg });
-              stream.push({ type: 'toolcall_end', contentIndex: idx, toolCall: item, partial: assistantMsg });
-            }
-            idx += 1;
-          }
-          stream.end(assistantMsg);
+          emitAssistantMessage(stream, assistantMsg);
           return;
         }
 
@@ -161,6 +176,8 @@ export function createPiStreamFn({
 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const abortListener = () => controller.abort();
+        if (options?.signal) options.signal.addEventListener('abort', abortListener);
 
         const requestBody = {
           model: effectiveModelId,
@@ -180,7 +197,10 @@ export function createPiStreamFn({
           },
           signal: controller.signal,
           body: JSON.stringify(requestBody),
-        }).finally(() => clearTimeout(timer));
+        }).finally(() => {
+          clearTimeout(timer);
+          if (options?.signal) options.signal.removeEventListener('abort', abortListener);
+        });
 
         const payload = await res.json().catch(() => ({}));
         if (!res.ok || payload.error) {
@@ -222,21 +242,7 @@ export function createPiStreamFn({
           content,
         };
 
-        stream.push({ type: 'start', partial: assistantMsg });
-        let idx = 0;
-        for (const item of content) {
-          if (item.type === 'text') {
-            stream.push({ type: 'text_start', contentIndex: idx, partial: assistantMsg });
-            stream.push({ type: 'text_delta', contentIndex: idx, delta: item.text, partial: assistantMsg });
-            stream.push({ type: 'text_end', contentIndex: idx, content: item.text, partial: assistantMsg });
-          } else if (item.type === 'toolCall') {
-            stream.push({ type: 'toolcall_start', contentIndex: idx, partial: assistantMsg });
-            stream.push({ type: 'toolcall_delta', contentIndex: idx, delta: '', partial: assistantMsg });
-            stream.push({ type: 'toolcall_end', contentIndex: idx, toolCall: item, partial: assistantMsg });
-          }
-          idx += 1;
-        }
-        stream.end(assistantMsg);
+        emitAssistantMessage(stream, assistantMsg);
       } catch (error) {
         logger.warn?.('Pi Agent streamFn encountered an error:', error.message);
         const errorMsg = {

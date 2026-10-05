@@ -200,7 +200,7 @@ export function createArticlePipeline({
   wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence,
   analyze = analyzePost, notifier = createHermesNotifier({ prisma }), coverImageGenerator = createCoverImageGenerator(),
   imageSearch = createTavilyImageSearch(), xSearch, collectWebImages = collectTavilyImages, logger = console, now = () => new Date(),
-  tools, authorAgent, criticAgent, usePiAgent = process.env.EARLYBIRD_USE_PI_AGENT === 'true',
+  tools, authorAgent, criticAgent, usePiAgent = process.env.EARLYBIRD_USE_PI_AGENT !== 'false',
 } = {}) {
   const editorialXSearch = xSearch || createEditorialXSearch({ scraperFactory, logger });
   const agentTools = tools || createEarlyBirdTools({
@@ -269,6 +269,16 @@ export function createArticlePipeline({
           triage = coordinated;
           metadata = metadataWithReview({ ...metadata, editorialResearch: research }, triage, triage);
           await saveReview(prisma, job, 'research_coordination', 1, triage, JSON.stringify(research));
+        }
+        if (triage.decision === 'drop') {
+          return prisma.earlyBirdArticleJob.update({
+            where: { id: job.id },
+            data: {
+              status: 'dropped',
+              error: `选题编排否决丢弃：${triage.issues.join('；') || triage.reason || '无新闻价值'}`,
+              metadata,
+            },
+          });
         }
         if (!['pass', 'rewrite', 'merge'].includes(triage.decision)) return manualReview(job, metadata, triage.issues.join('；') || '总编辑返回了无法执行的审核决定');
         const relatedJobs = triage.decision === 'merge' ? candidates.filter(item => triage.relatedJobIds.includes(item.id)) : [];
@@ -344,6 +354,16 @@ export function createArticlePipeline({
           const hash = reviewInputHash(candidate.markdown);
           if (quality.title) candidate.title = quality.title;
           if (quality.decision === 'pass') { article = candidate; break; }
+          if (quality.decision === 'drop') {
+            return prisma.earlyBirdArticleJob.update({
+              where: { id: job.id },
+              data: {
+                status: 'dropped',
+                error: `成稿审校否决丢弃：${quality.issues.join('；') || quality.reason || '经核查无新闻价值或属不实内容'}`,
+                metadata,
+              },
+            });
+          }
           if (quality.decision === 'merge') {
             if (quality.relatedJobIds.length && mergeDepth < 1) {
               return processJob(job.id, { force: true, dailyReview, preselectedDecision: quality, mergeDepth: mergeDepth + 1 });

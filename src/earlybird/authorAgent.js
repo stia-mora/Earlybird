@@ -2,10 +2,9 @@
 import { Agent } from '@earendil-works/pi-agent-core';
 import { createPiStreamFn } from './agentStream.js';
 import { createEarlyBirdTools } from './agentTools.js';
-import { sanitizeUnicode } from './utils.js';
+import { extractJson, sanitizeUnicode } from './utils.js';
 import {
   articleVisualAssets,
-  hasEditorialStructure,
   prepareEditorialMarkdown,
 } from './articleWriter.js';
 
@@ -44,20 +43,6 @@ const AUTHOR_SYSTEM_PROMPT = `你是中文科技深度报道资深主笔（风�
   "markdown": "完整排版好的 Markdown 正文（包含标题、插图和正文）",
   "references": ["引用的来源链接列表"]
 }`;
-
-function extractJson(text) {
-  if (!text) return null;
-  const cleaned = String(text).trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch {}
-    }
-    return null;
-  }
-}
 
 export function createAuthorAgent({
   streamFn,

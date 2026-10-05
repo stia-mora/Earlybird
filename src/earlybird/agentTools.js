@@ -1,10 +1,10 @@
 // Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import { assembleThread } from './threadAssembler.js';
 import { renderGzhMarkdown, validateGzhHtml } from './gzhRenderer.js';
 import { captureEvidence } from './evidenceCapture.js';
-import { isNonemptyFile, postUrl, sanitizeUnicode } from './utils.js';
+import { isNonemptyFile, sanitizeUnicode } from './utils.js';
 
 function compactText(value, max = 500) {
   return sanitizeUnicode(String(value || '')).replace(/\s+/g, ' ').trim().slice(0, max);
@@ -28,7 +28,7 @@ export function createFetchTweetThreadTool({ scraperFactory, defaultScraper, log
     execute: async (_toolCallId, params) => {
       try {
         const postId = params.postId || (params.tweetUrl?.match(/status\/(\d+)/)?.[1]) || '';
-        const author = params.author || '';
+        const author = params.author || (params.tweetUrl?.match(/(?:x|twitter)\.com\/([^/]+)\/status/)?.[1]) || '';
         const sourceUrl = params.tweetUrl || (postId ? `https://x.com/${author || 'user'}/status/${postId}` : '');
         const post = {
           id: postId,
@@ -159,10 +159,11 @@ export function createCaptureTweetEvidenceTool({ evidence = captureEvidence, med
     }),
     execute: async (_toolCallId, params) => {
       try {
-        const outputPath = join(mediaDir, `${params.postId}-evidence.png`);
+        const postId = params.postId || params.tweetUrl?.match(/status\/(\d+)/)?.[1] || 'tweet';
+        const outputPath = join(mediaDir, `${postId}-evidence.png`);
         await evidence({
           tweetUrl: params.tweetUrl,
-          postId: params.postId,
+          postId,
           translation: params.translation || '',
           outputPath,
         });

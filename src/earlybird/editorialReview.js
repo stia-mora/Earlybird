@@ -11,7 +11,7 @@ export const ARTICLE_STANDARDS = {
   event: { minBody: 1800, maxBody: 2600, minVisuals: 3, minHeadings: 3, minStories: 2 },
 };
 
-const DECISIONS = new Set(['pass', 'rewrite', 'merge', 'manual_review']);
+const DECISIONS = new Set(['pass', 'rewrite', 'merge', 'manual_review', 'drop']);
 const CONTENT_TYPES = new Set(Object.keys(ARTICLE_STANDARDS));
 
 function compact(value, maximum = 500) {

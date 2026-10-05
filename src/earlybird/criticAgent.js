@@ -2,6 +2,7 @@
 import { Agent } from '@earendil-works/pi-agent-core';
 import { createPiStreamFn } from './agentStream.js';
 import { createEarlyBirdTools } from './agentTools.js';
+import { extractJson } from './utils.js';
 import {
   createEditorialOrchestrator,
   draftQualityIssues,
@@ -43,19 +44,7 @@ const CRITIC_SYSTEM_PROMPT = `你是独立于撰稿作者的【资深事实核�
   "reason": "总体审校结论摘要"
 }`;
 
-function extractJson(text) {
-  if (!text) return null;
-  const cleaned = String(text).trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch {}
-    }
-    return null;
-  }
-}
+
 
 export function createCriticAgent({
   streamFn,

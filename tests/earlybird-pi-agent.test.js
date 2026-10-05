@@ -380,5 +380,125 @@ describe('EarlyBird Pi Agent Architecture', () => {
         else process.env.EARLYBIRD_THREAD_WAIT_MS = originalWait;
       }
     });
+
+    it('handles drop decision from critic agent by setting job status to dropped', async () => {
+      const originalWait = process.env.EARLYBIRD_THREAD_WAIT_MS;
+      process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
+      try {
+        const post = {
+          id: 'p-drop-job',
+          postId: 'p-drop',
+          authorUsername: 'someone',
+          sourceUrl: 'https://x.com/someone/status/p-drop',
+          text: 'random gossip',
+          rawData: { id: 'p-drop', text: 'random gossip' },
+          createdAt: new Date(),
+        };
+        const job = {
+          id: 'j-drop-job',
+          status: 'detected',
+          metadata: {},
+          detectedAt: new Date(),
+          postId: post.id,
+          sourceId: 's-drop',
+          post,
+          source: { handle: 'someone' },
+          draft: null,
+        };
+
+        const prisma = {
+          earlyBirdArticleJob: {
+            findUnique: vi.fn(async () => job),
+            findMany: vi.fn(async () => []),
+            update: vi.fn(async ({ data }) => ({ ...job, ...data })),
+          },
+          earlyBirdPost: { update: vi.fn(async () => ({})) },
+          earlyBirdEditorialReview: { create: vi.fn(async ({ data }) => data) },
+        };
+
+        const criticAgent = {
+          screen: vi.fn(async () => ({ newsworthy: 8, hasConcreteFact: true, reason: 'looks ok at first' })),
+          triage: vi.fn(async () => ({ decision: 'pass', contentType: 'brief', qualityScore: 80, issues: [], rewriteInstructions: '', relatedJobIds: [], visualPlan: [] })),
+          reviewDraft: vi.fn(async () => ({
+            decision: 'drop',
+            contentType: 'brief',
+            qualityScore: 20,
+            title: '八卦',
+            issues: ['纯谣言无实际技术信息'],
+            rewriteInstructions: '不可挽救，建议废弃',
+            relatedJobIds: [],
+            visualPlan: [],
+          })),
+        };
+
+        const authorAgent = {
+          write: vi.fn(async () => ({
+            title: '八卦传闻',
+            candidateTitles: ['八卦传闻'],
+            digest: '某公司传闻',
+            markdown: '据传某公司有大动作。但这可能只是谣言。',
+          })),
+        };
+
+        const llmClient = {
+          complete: vi.fn(async () => ({ markdown: '据传某公司有大动作。但这可能只是谣言。', score: 50 })),
+        };
+
+        const pipeline = createArticlePipeline({
+          prisma,
+          scraperFactory: async () => ({ scrapeFullThread: async () => [post.rawData] }),
+          mediaPipeline: { collect: vi.fn(async () => []) },
+          evidence: vi.fn(async () => ({})),
+          analyze: vi.fn(async () => ({ translation: '', digest: '传闻', facts: [] })),
+          wechatClient: null,
+          llmClient,
+          authorAgent,
+          criticAgent,
+        });
+
+        const result = await pipeline.process(job.id);
+        expect(result.status).toBe('dropped');
+        expect(result.error).toContain('纯谣言无实际技术信息');
+      } finally {
+        if (originalWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
+        else process.env.EARLYBIRD_THREAD_WAIT_MS = originalWait;
+      }
+    });
+
+    it('tool fallbacks parse author and postId from tweetUrl when omitted', async () => {
+      const mediaDir = await mkdtemp(join(tmpdir(), 'eb-tool-evidence-fallback-'));
+      const mockEvidence = vi.fn(async ({ outputPath }) => {
+        await writeFile(outputPath, 'fake-png-data');
+      });
+      const mockScraper = {
+        scrapeFullThread: vi.fn(async () => [{ id: '99999', text: 'thread post' }]),
+      };
+
+      const tools = createEarlyBirdTools({
+        evidence: mockEvidence,
+        mediaDir,
+        scraperFactory: async () => mockScraper,
+      });
+
+      const captureTool = tools.find((t) => t.name === 'capture_tweet_evidence');
+      const threadTool = tools.find((t) => t.name === 'fetch_tweet_thread');
+
+      const captureRes = await captureTool.execute('call-cap', {
+        tweetUrl: 'https://x.com/tech_insider/status/1234567890',
+      });
+      expect(captureRes.content[0].text).toContain('1234567890-evidence.png');
+      expect(mockEvidence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          postId: '1234567890',
+        })
+      );
+
+      const threadRes = await threadTool.execute('call-thread', {
+        tweetUrl: 'https://x.com/tech_insider/status/1234567890',
+      });
+      expect(threadRes.content[0].text).toContain('thread post');
+      expect(threadRes.structuredContent.tweets[0].id).toBe('99999');
+      expect(mockScraper.scrapeFullThread).toHaveBeenCalledWith('1234567890');
+    });
   });
 });
