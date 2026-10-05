@@ -1000,7 +1000,7 @@ describe('cover image pipeline integration', () => {
         }
         if (url.includes('/cgi-bin/draft/get')) {
           if (callCount === 1) {
-            return { ok: false, json: async () => ({ errcode: 40001, errmsg: 'invalid credential' }) };
+            return { ok: false, json: async () => ({ errcode: 42007, errmsg: 'access_token timeout' }) };
           }
           return { ok: true, json: async () => ({ media_id: 'draft-1', news_item: [{ title: 'ok' }] }) };
         }
@@ -1008,10 +1008,104 @@ describe('cover image pipeline integration', () => {
       });
 
       const client = createWeChatClient({ appId: 'test-app', appSecret: 'test-secret', fetchImpl });
-      await expect(client.getDraft('draft-1')).rejects.toThrow('invalid credential');
+      await expect(client.getDraft('draft-1')).rejects.toThrow('access_token timeout');
       // Token should have been cleared; next call must request a new token
       await expect(client.getDraft('draft-1')).resolves.toMatchObject({ media_id: 'draft-1' });
       expect(callCount).toBe(2);
+    });
+
+    it('correctly converts punctuation and pairs quotation marks in text with emojis', () => {
+      expect(fullWidthPunctuation('🚀"测试"')).toBe('🚀“测试”');
+      expect(fullWidthPunctuation('这是测试, 包含🚀')).toBe('这是测试，包含🚀');
+      expect(fullWidthPunctuation('🚀提示: "核心突破"')).toBe('🚀提示：“核心突破”');
+    });
+
+    it('compares posts with numeric epoch timestamps accurately', () => {
+      expect(comparePosts({ createdAt: 1000 }, { createdAt: 2000 })).toBeLessThan(0);
+      expect(comparePosts({ createdAt: 2000 }, { createdAt: 1000 })).toBeGreaterThan(0);
+      expect(comparePosts({ createdAt: 1000, id: '10' }, { createdAt: 1000, id: '20' })).toBeLessThan(0);
+    });
+
+    it('preserves code indentation and separates functions across blank lines in code blocks', () => {
+      const code = '```python\ndef foo():\n    return 1\n\ndef bar():\n    return 2\n```';
+      const compacted = compactEditorialMarkdown(code);
+      expect(compacted).toContain('    return 1');
+      expect(compacted).toContain('def bar():');
+      expect(compacted).not.toContain('return 1 def bar():');
+
+      const noisyCode = '```python\n# 1000次点赞测试\nx = "10:20:30"\n```';
+      const sanitized = sanitizeEditorialMarkdown(noisyCode);
+      expect(sanitized).toContain('# 1000次点赞测试');
+      expect(sanitized).toContain('10:20:30');
+    });
+
+    it('strips single underscore italics without damaging snake_case variables', () => {
+      expect(compactEditorialMarkdown('这是_关键改进_，位于 snake_case_identifier 中。')).toBe('这是关键改进，位于 snake_case_identifier 中。');
+    });
+
+    it('renders code blocks with monospace pre-wrap and strips markdown links from blockquotes', async () => {
+      const markdown = '> [官方链接](https://openai.com)\n\n```python\nprint("hello, world")\n```';
+      const html = await renderGzhMarkdown(markdown, { title: '测试', digest: '摘要' });
+      expect(html).toContain('font-family:Consolas,monospace');
+      expect(html).toContain('white-space:pre-wrap');
+      expect(html).toContain('print(&quot;hello, world&quot;)');
+      expect(html).toContain('官方链接');
+      expect(html).not.toContain('https://openai.com</span>');
+    });
+
+    it('appends type query parameter to WeChat uploadPermanentMaterial and handles 502 gracefully', async () => {
+      let requestedUrl = '';
+      const fetchImpl = vi.fn(async (url) => {
+        requestedUrl = url;
+        if (url.includes('/cgi-bin/token')) {
+          return { ok: true, json: async () => ({ access_token: 'token-1', expires_in: 7200 }) };
+        }
+        if (url.includes('/cgi-bin/material/add_material')) {
+          return { ok: true, json: async () => ({ media_id: 'thumb-123' }) };
+        }
+        return { ok: false, status: 502, statusText: 'Bad Gateway', json: async () => { throw new Error('Unexpected token <'); } };
+      });
+      const client = createWeChatClient({ appId: 'app', appSecret: 'sec', fetchImpl });
+      const dir = await mkdtemp(join(tmpdir(), 'wechat-thumb-'));
+      const testFile = join(dir, 'test.jpg');
+      await writeFile(testFile, 'dummy');
+      const res = await client.uploadPermanentMaterial(testFile, 'thumb');
+      expect(res.media_id).toBe('thumb-123');
+      expect(requestedUrl).toContain('&type=thumb');
+
+      // Test graceful handling of non-JSON 502 on draft request
+      await expect(client.getDraft('draft-1')).rejects.toThrow('WeChat API error 502');
+    });
+
+    it('treats already-deleted old drafts as deleted in replaceManagedDrafts', async () => {
+      const replacements = { create: vi.fn(async () => ({ id: 'rep-1' })), update: vi.fn(async () => ({})) };
+      const drafts = { update: vi.fn(async () => ({})), upsert: vi.fn(async () => ({})) };
+      const result = await replaceManagedDrafts({
+        prisma: { earlyBirdDraftReplacement: replacements, earlyBirdDraft: drafts },
+        wechatClient: { deleteDraft: vi.fn(async () => { throw new Error('WeChat API error 40007: invalid media_id'); }) },
+        primaryJob: { id: 'j-primary' },
+        storyJobs: [{ id: 'j-primary', draft: { id: 'd-old', mediaId: 'old-media', deletedAt: null } }],
+        draft: { media_id: 'new-media' }, verified: { media_id: 'new-media' }, requestSummary: { title: '新稿' },
+      });
+      expect(result.failure).toBeUndefined();
+      expect(replacements.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'deleted', error: null } }));
+    });
+
+    it('scopes candidateIds to merge decisions only and preserves contentType from job metadata', () => {
+      const decision = normalizeEditorialDecision(
+        { decision: 'pass', qualityScore: 85, contentType: undefined, relatedJobIds: ['cand-1'] },
+        { job: { id: 'j1', metadata: { editorial: { contentType: 'explainer' } } }, candidates: [{ id: 'cand-1' }], phase: 'draft' }
+      );
+      expect(decision.decision).toBe('pass');
+      expect(decision.contentType).toBe('explainer');
+      expect(decision.relatedJobIds).toEqual([]);
+    });
+
+    it('safely renders markdown containing dollar signs without corrupted substitutions', async () => {
+      const markdown = `这是第一段分析。${'正文文字说明。'.repeat(25)}\n\n![图表](data/media/chart.png)\n\n收入达到 $1000 万美元，同比增长 50% 之多。`;
+      const html = await renderGzhMarkdown(markdown, { title: '测试', digest: '摘要' });
+      expect(html).toContain('$1000');
+      expect(html).toContain('50%');
     });
   });
 });

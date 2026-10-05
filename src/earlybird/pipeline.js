@@ -128,8 +128,9 @@ async function saveReview(prisma, job, phase, attempt, decision, input) {
 async function candidateJobs(prisma, job, { dailyReview = false, now = new Date() } = {}) {
   if (!prisma?.earlyBirdArticleJob?.findMany) return [];
   const dayRange = shanghaiDayRange(now);
-  const start = dailyReview ? dayRange.start : new Date(job.detectedAt || now);
-  const end = dailyReview ? now : new Date(start.getTime() + reviewWindowMs());
+  const jobTime = new Date(job.detectedAt || now).getTime();
+  const start = dailyReview ? dayRange.start : new Date(jobTime - reviewWindowMs());
+  const end = dailyReview ? now : new Date(jobTime + reviewWindowMs());
   return prisma.earlyBirdArticleJob.findMany({
     where: { id: { not: job.id }, status: { in: dailyReview ? ['detected', 'verified'] : ['detected'] }, detectedAt: { gte: start, lte: end } },
     include: { post: true, source: true, draft: true }, orderBy: { detectedAt: 'asc' }, take: 30,
@@ -169,6 +170,12 @@ export async function replaceManagedDrafts({ prisma, wechatClient, primaryJob, s
       if (prisma?.earlyBirdDraftReplacement?.update) await prisma.earlyBirdDraftReplacement.update({ where: { id: record.id }, data: { status: 'deleted', error: null } });
       deleted.push(item);
     } catch (error) {
+      const alreadyGone = error?.message?.includes('40007') || /invalid media_id|does not exist/i.test(error?.message || '');
+      if (alreadyGone) {
+        if (prisma?.earlyBirdDraftReplacement?.update) await prisma.earlyBirdDraftReplacement.update({ where: { id: record.id }, data: { status: 'deleted', error: null } });
+        deleted.push(item);
+        continue;
+      }
       if (prisma?.earlyBirdDraftReplacement?.update) await prisma.earlyBirdDraftReplacement.update({ where: { id: record.id }, data: { status: 'delete_failed', error: error.message } });
       if (prisma?.earlyBirdDraft?.update) await prisma.earlyBirdDraft.update({ where: { id: item.draft.id }, data: { deleteError: error.message } });
       return { failure: `新草稿 ${draft.media_id} 已创建，但旧草稿 ${item.draft.mediaId} 删除失败：${error.message}` };
@@ -230,10 +237,8 @@ export function createArticlePipeline({
           metadata = metadataWithReview({ ...metadata, editorialResearch: research }, triage, triage);
           await saveReview(prisma, job, 'research_coordination', 1, triage, JSON.stringify(research));
         }
-        if (triage.decision === 'manual_review') return manualReview(job, metadata, triage.issues.join('；') || '总编辑要求人工审核');
         if (!['pass', 'rewrite', 'merge'].includes(triage.decision)) return manualReview(job, metadata, triage.issues.join('；') || '总编辑返回了无法执行的审核决定');
-
-        const relatedJobs = candidates.filter(item => triage.relatedJobIds.includes(item.id));
+        const relatedJobs = triage.decision === 'merge' ? candidates.filter(item => triage.relatedJobIds.includes(item.id)) : [];
         const storyJobs = [job, ...relatedJobs];
         const selectedResearch = selectEditorialResearch(research, triage.selectedResearchUrls);
         if (dailyReview && job.status === 'verified' && triage.decision === 'pass' && !relatedJobs.length && job.markdown) {
@@ -341,6 +346,7 @@ export function createArticlePipeline({
         const thumbPath = cover?.localPath || usedVisuals[0]?.localPath;
         if (!thumbPath) return manualReview(job, metadata, '没有可用于公众号封面的已验证图片');
         const thumb = await wechatClient.uploadPermanentMaterial(thumbPath, 'thumb');
+        if (!thumb?.media_id) throw new Error('WeChat permanent material upload did not return a media_id');
         for (const asset of [...usedVisuals, ...endVisuals]) {
           const uploaded = await wechatClient.uploadArticleImage(asset.localPath);
           if (uploaded.url) assetUrls.set(asset.localPath, uploaded.url);
@@ -350,16 +356,16 @@ export function createArticlePipeline({
         for (const asset of manualVideos) await prisma.earlyBirdAsset.update({ where: { id: asset.id }, data: { wechatMediaId: null, status: 'manual_upload_required' } });
         const markdownForRender = [...assetUrls.entries()].reduce((value, [localPath, url]) => {
           return value
-            .replaceAll(localPath, url)
-            .replaceAll(localPath.replace(/\\/g, '/'), url)
-            .replaceAll(localPath.replace(/\//g, '\\'), url);
+            .replaceAll(localPath, () => url)
+            .replaceAll(localPath.replace(/\\/g, '/'), () => url)
+            .replaceAll(localPath.replace(/\//g, '\\'), () => url);
         }, article.markdown);
         const renderedEndVisuals = endVisuals.map(asset => ({ ...asset, src: assetUrls.get(asset.localPath) || asset.localPath }));
         metadata = { ...metadata, cover: cover || { status: 'source-fallback', reason: 'cover image generation failed' } };
         const html = await renderGzhMarkdown(markdownForRender, { title: article.title, digest: article.digest, contentType: editorial.contentType, references, endVisuals: renderedEndVisuals, imageAttributions: imageAttributions(usedVisuals, assetUrls) });
         await validateGzhHtml(html);
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html, markdown: article.markdown, metadata } });
-        const draft = await wechatClient.addDraft({ title: article.title.slice(0, 64), author: process.env.WECHAT_AUTHOR || '', digest: article.digest?.slice(0, 120), content: html, content_source_url: '', thumb_media_id: thumb?.media_id || '' });
+        const draft = await wechatClient.addDraft({ title: article.title.slice(0, 64), author: process.env.WECHAT_AUTHOR || '', digest: (article.digest || '').slice(0, 120), content: html, content_source_url: '', thumb_media_id: thumb?.media_id || '' });
         const verified = await wechatClient.getDraft(draft.media_id);
         if (!verified?.news_item && !verified?.media_id) throw new Error('WeChat draft verification returned no article');
         const requestSummary = { title: article.title, sourceUrl: job.post.sourceUrl, contentType: editorial.contentType, reviewScore: metadata.review?.qualityScore, cover: { status: metadata.cover.status, model: metadata.cover.model, width: metadata.cover.width, height: metadata.cover.height } };

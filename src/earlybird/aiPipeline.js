@@ -35,7 +35,7 @@ export function createMultimodalClient({ apiKey = process.env.EARLYBIRD_LLM_API_
           const timer = setTimeout(() => controller.abort(), timeoutMs);
           try {
             const response = await fetchImpl(`${provider.baseUrl.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${provider.apiKey}` }, signal: controller.signal, body: JSON.stringify({ model: provider.model, temperature: 0.4, max_tokens: maxOutputTokens, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content }] }) });
-            const payload = await response.json();
+            const payload = await response.json().catch(() => ({}));
             if (!response.ok || payload.error) throw new Error(payload.error?.message || `LLM request failed (${response.status})`);
             return extractJson(payload.choices?.[0]?.message?.content || '');
           } catch (error) {
@@ -80,7 +80,7 @@ export function createSpeechToText({ apiKey = process.env.EARLYBIRD_STT_API_KEY 
     form.append('file', new Blob([await readFile(filePath)]), basename(filePath));
     form.append('model', model);
     const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/audio/transcriptions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}` }, body: form });
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error?.message || `STT request failed (${response.status})`);
     return data.text || '';
   };

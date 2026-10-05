@@ -28,17 +28,17 @@ export function createWeChatClient({ appId = process.env.WECHAT_APP_ID, appSecre
     if (token && Date.now() < tokenExpiresAt - 60000) return token;
     if (!appId || !appSecret) throw new Error('WECHAT_APP_ID and WECHAT_APP_SECRET are required');
     const response = await fetchImpl(`${apiBase}/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appId)}&secret=${encodeURIComponent(appSecret)}`);
-    const data = await response.json();
-    if (data.errcode) throw new Error(`WeChat token error ${data.errcode}: ${data.errmsg}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.errcode) throw new Error(`WeChat token error ${data.errcode || response.status}: ${data.errmsg || response.statusText || 'token request failed'}`);
     token = data.access_token;
     tokenExpiresAt = Date.now() + Number(data.expires_in || 7200) * 1000;
     return token;
   }
   async function jsonRequest(path, body) {
     const response = await fetchImpl(`${apiBase}${path}?access_token=${encodeURIComponent(await accessToken())}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    const data = await response.json();
-    if (data.errcode && [40001, 40014, 42001].includes(data.errcode)) { token = null; tokenExpiresAt = 0; }
-    if (!response.ok || data.errcode) throw new Error(`WeChat API error ${data.errcode || response.status}: ${data.errmsg || response.statusText}`);
+    const data = await response.json().catch(() => ({}));
+    if (data.errcode && [40001, 40014, 42001, 42007].includes(data.errcode)) { token = null; tokenExpiresAt = 0; }
+    if (!response.ok || data.errcode) throw new Error(`WeChat API error ${data.errcode || response.status}: ${data.errmsg || response.statusText || 'request failed'}`);
     return data;
   }
   async function upload(path, filePath, extra = {}) {
@@ -48,10 +48,11 @@ export function createWeChatClient({ appId = process.env.WECHAT_APP_ID, appSecre
       const mimeType = prepared.path.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
       form.append('media', new Blob([await readFile(prepared.path)], { type: mimeType }), prepared.path.split(/[\\/]/).pop());
       for (const [key, value] of Object.entries(extra)) form.append(key, value);
-      const response = await fetchImpl(`${apiBase}${path}?access_token=${encodeURIComponent(await accessToken())}`, { method: 'POST', body: form });
-      const data = await response.json();
-      if (data.errcode && [40001, 40014, 42001].includes(data.errcode)) { token = null; tokenExpiresAt = 0; }
-      if (!response.ok || data.errcode) throw new Error(`WeChat upload error ${data.errcode || response.status}: ${data.errmsg || response.statusText}`);
+      const queryType = extra.type ? `&type=${encodeURIComponent(extra.type)}` : '';
+      const response = await fetchImpl(`${apiBase}${path}?access_token=${encodeURIComponent(await accessToken())}${queryType}`, { method: 'POST', body: form });
+      const data = await response.json().catch(() => ({}));
+      if (data.errcode && [40001, 40014, 42001, 42007].includes(data.errcode)) { token = null; tokenExpiresAt = 0; }
+      if (!response.ok || data.errcode) throw new Error(`WeChat upload error ${data.errcode || response.status}: ${data.errmsg || response.statusText || 'upload failed'}`);
       return data;
     } finally {
       await prepared.cleanup();

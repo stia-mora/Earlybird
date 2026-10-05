@@ -159,7 +159,7 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
     if (section.title) { headingNumber += 1; html += `<section style="padding-bottom:14px;border-bottom:1px solid #E4E4E7;"><p style="font-size:42px;font-weight:900;color:#E4E4E7;margin:0;line-height:1;"><span leaf="">${String(headingNumber).padStart(2, '0')}</span></p><h3 style="font-size:20px;font-weight:800;color:#27272A;margin:0;line-height:1.4;"><span leaf="">${escapeHtml(fullWidthPunctuation(section.title))}</span></h3></section>`; }
     for (const item of (section.body || [])) {
       if (item && typeof item === 'object' && item.type === 'code') {
-        html += `<section style="margin:20px 10px;padding:14px;background:#27272A;color:#FFFFFF;overflow-x:auto;"><p style="font-size:13px;line-height:1.6;margin:0;"><span leaf="">${escapeHtml(item.content)}</span></p></section>`;
+        html += `<section style="margin:20px 10px;padding:14px;background:#27272A;color:#FFFFFF;overflow-x:auto;font-family:Consolas,monospace;white-space:pre-wrap;"><p style="font-size:13px;line-height:1.6;margin:0;font-family:Consolas,monospace;white-space:pre-wrap;word-break:break-all;"><span leaf="">${escapeHtml(item.content)}</span></p></section>`;
         continue;
       }
       const image = item.trim().match(/^!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)$/);
@@ -184,7 +184,7 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
         html += `<p style="${BODY}padding-left:14px;"> <span leaf="">• </span>${inline(listText, emphasis)}</p>`;
         continue;
       }
-      if (/^>\s?/.test(item)) { html += `<p style="${BODY}border-left:3px solid #52525B;padding-left:12px;color:#3F3F46;"><span leaf="">${escapeHtml(fullWidthPunctuation(item.replace(/^>\s?/, '')))}</span></p>`; continue; }
+      if (/^>\s?/.test(item)) { html += `<p style="${BODY}border-left:3px solid #52525B;padding-left:12px;color:#3F3F46;"><span leaf="">${escapeHtml(plainText(item.replace(/^>\s?/, '')))}</span></p>`; continue; }
       const emphasis = highlightBudget > 0 ? findHighlightPhrase(item) : '';
       if (emphasis) highlightBudget -= 1;
       html += `<p style="${BODY}">${inline(item, emphasis)}</p>`;

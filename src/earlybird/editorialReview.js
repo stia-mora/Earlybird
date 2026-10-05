@@ -32,19 +32,20 @@ function arrayOfText(value, maximum = 8) {
 }
 
 function sourceSummary(job) {
+  if (!job) return {};
   return {
     id: job.id,
-    postId: job.post?.postId,
-    author: job.post?.authorUsername || job.source?.handle,
-    sourceUrl: job.post?.sourceUrl,
-    createdAt: job.post?.createdAt || job.detectedAt,
-    text: compact(job.post?.text, 700),
-    digest: compact(job.metadata?.analysis?.digest, 240),
+    postId: job.post?.postId || job.postId,
+    author: job.post?.authorUsername || job.authorUsername || job.source?.handle || job.author,
+    sourceUrl: job.post?.sourceUrl || job.sourceUrl,
+    createdAt: job.post?.createdAt || job.createdAt || job.detectedAt,
+    text: compact(job.post?.text || job.text, 700),
+    digest: compact(job.metadata?.analysis?.digest || job.digest, 240),
   };
 }
 
 function defaultVisualPlan(job, count, contentType) {
-  const subject = compact(job.post?.text || job.metadata?.analysis?.digest || job.source?.displayName || job.source?.handle, 120);
+  const subject = compact(job?.post?.text || job?.metadata?.analysis?.digest || job?.source?.displayName || job?.source?.handle || job?.text, 120);
   if (contentType === 'explainer') {
     const roles = [
       ['official announcement', '核对事件核心结果'], ['official demo example', '展示具体使用场景'],
@@ -99,11 +100,11 @@ export function normalizeVisualPlan(value, { job, contentType, fillDefaults = tr
 export function normalizeEditorialDecision(raw, { job, candidates = [], phase = 'triage', localIssues = [], availableResearchUrls = [] } = {}) {
   const knownIds = new Set(candidates.map(candidate => candidate.id));
   const knownResearchUrls = new Set(availableResearchUrls);
-  const candidateIds = [...new Set((Array.isArray(raw?.relatedJobIds) ? raw.relatedJobIds : [])
-    .map(String)
-    .filter(id => id !== job?.id && knownIds.has(id)))].slice(0, 8);
-  let contentType = CONTENT_TYPES.has(raw?.contentType) ? raw.contentType : 'brief';
+  let contentType = CONTENT_TYPES.has(raw?.contentType) ? raw.contentType : (job?.metadata?.editorial?.contentType || 'brief');
   let decision = DECISIONS.has(raw?.decision) ? raw.decision : (phase === 'triage' ? 'pass' : 'rewrite');
+  const candidateIds = decision === 'merge' ? [...new Set((Array.isArray(raw?.relatedJobIds) ? raw.relatedJobIds : [])
+    .map(String)
+    .filter(id => id !== job?.id && knownIds.has(id)))].slice(0, 8) : [];
   const issues = arrayOfText([...(localIssues || []), ...(raw?.issues || [])]);
   const rewriteInstructions = compact(raw?.rewriteInstructions || raw?.reason || '', 1200);
   const selectedResearchUrls = [...new Set((Array.isArray(raw?.selectedResearchUrls) ? raw.selectedResearchUrls : [])

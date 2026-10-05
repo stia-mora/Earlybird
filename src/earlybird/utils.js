@@ -24,8 +24,9 @@ export function postUrl(post) {
 }
 
 export function comparePosts(a, b) {
-  const ad = Date.parse(a?.createdAt || '') || 0;
-  const bd = Date.parse(b?.createdAt || '') || 0;
+  const toTime = val => (val instanceof Date ? val.getTime() : typeof val === 'number' ? val : (Date.parse(val || '') || 0));
+  const ad = toTime(a?.createdAt);
+  const bd = toTime(b?.createdAt);
   if (ad !== bd) return ad - bd;
   try {
     const aid = BigInt(a?.id || 0);
@@ -104,15 +105,16 @@ export function sanitizeJsonUnicode(value) {
 
 export function fullWidthPunctuation(text) {
   const value = String(text || '');
+  const chars = [...value];
   const replacements = { ',': '，', '.': '。', '!': '！', '?': '？', ':': '：', ';': '；', '(': '（', ')': '）' };
   const isChinese = character => /[\u3400-\u9FFF\u3000-\u303F\uFF00-\uFFEF\u2018-\u201D\u2014\u2026]/.test(character || '');
 
   let doubleQuoteOpen = false;
   let singleQuoteOpen = false;
 
-  return [...value].map((character, index) => {
+  return chars.map((character, index) => {
     if (character === '"') {
-      const inChineseContext = isChinese(value[index - 1]) || isChinese(value[index + 1]);
+      const inChineseContext = isChinese(chars[index - 1]) || isChinese(chars[index + 1]);
       if (!inChineseContext) return character;
       if (!doubleQuoteOpen) {
         doubleQuoteOpen = true;
@@ -122,7 +124,7 @@ export function fullWidthPunctuation(text) {
       return '”';
     }
     if (character === "'") {
-      const inChineseContext = isChinese(value[index - 1]) || isChinese(value[index + 1]);
+      const inChineseContext = isChinese(chars[index - 1]) || isChinese(chars[index + 1]);
       if (!inChineseContext) return character;
       if (!singleQuoteOpen) {
         singleQuoteOpen = true;
@@ -133,7 +135,7 @@ export function fullWidthPunctuation(text) {
     }
     if (!replacements[character]) return character;
     // Preserve punctuation inside English prose, URLs, contractions, and versions such as Image 2.0.
-    return isChinese(value[index - 1]) || isChinese(value[index + 1]) ? replacements[character] : character;
+    return isChinese(chars[index - 1]) || isChinese(chars[index + 1]) ? replacements[character] : character;
   }).join('').replace(/([，。！？；：])\s+(?=[\u3400-\u9FFF\u3000-\u303F\uFF00-\uFFEF\u2018-\u201D])/g, '$1');
 }
 

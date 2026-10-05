@@ -14,7 +14,8 @@ function stripInlineMarkdown(value) {
   return String(value || '')
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/__([^_\n]+)__/g, '$1')
-    .replace(/\*([^*\n]+)\*/g, '$1');
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/(^|[^\w])_([^_\n]+)_(?=[^\w]|$)/g, '$1$2');
 }
 
 function splitParagraph(value, maximum) {
@@ -44,7 +45,8 @@ export function compactEditorialMarkdown(markdown, maximum = MAX_PARAGRAPH_LENGT
   for (const raw of lines) {
     const line = raw.trimEnd();
     if (line.startsWith('```')) { inCode = !inCode; normalized.push(line); continue; }
-    if (inCode || !line.trim() || /^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(line)) { normalized.push(line.trim()); continue; }
+    if (inCode) { normalized.push(line); continue; }
+    if (!line.trim() || /^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(line)) { normalized.push(line.trim()); continue; }
     const heading = line.match(/^(#{1,6}\s+)(.+)$/);
     if (heading) { normalized.push(`${heading[1]}${stripInlineMarkdown(heading[2])}`); continue; }
     const list = line.match(/^[-*+]\s+(.+)$/);
@@ -56,7 +58,10 @@ export function compactEditorialMarkdown(markdown, maximum = MAX_PARAGRAPH_LENGT
 
 export function sanitizeEditorialMarkdown(markdown, { preserveParagraphs = false } = {}) {
   const lines = compactEditorialMarkdown(markdown, MAX_PARAGRAPH_LENGTH, { mergeShort: !preserveParagraphs }).split('\n');
+  let inCode = false;
   return lines.map(line => {
+    if (line.startsWith('```')) { inCode = !inCode; return line; }
+    if (inCode) return line;
     if (!line.trim() || /^#{1,6}\s+/.test(line) || /^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(line)) return line.trim();
     const prefix = line.match(/^[-*+]\s+/)?.[0] || '';
     const text = prefix ? line.slice(prefix.length) : line;
@@ -91,8 +96,10 @@ export function varyEditorialParagraphs(markdown) {
   const lines = sanitizeEditorialMarkdown(markdown).split('\n');
   const varied = [];
   let eligibleParagraphs = 0;
+  let inCode = false;
   for (const line of lines) {
-    if (!isPlainParagraph(line)) { varied.push(line); continue; }
+    if (line.startsWith('```')) { inCode = !inCode; varied.push(line); continue; }
+    if (inCode || !isPlainParagraph(line)) { varied.push(line); continue; }
     const sentences = proseSentences(line.trim());
     if (sentences.length < 2) { varied.push(line); continue; }
     eligibleParagraphs += 1;
@@ -122,11 +129,13 @@ function isPlainParagraph(line) {
 
 function mergeShortParagraphs(lines, minimum, maximum) {
   const merged = [];
+  let inCode = false;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (!isPlainParagraph(line)) { merged.push(line); continue; }
+    if (line.startsWith('```')) { inCode = !inCode; merged.push(line); continue; }
+    if (inCode || !isPlainParagraph(line)) { merged.push(line); continue; }
     let paragraph = line.trim();
-    while (paragraph.length < minimum && !lines[index + 1]?.trim() && isPlainParagraph(lines[index + 2] || '')) {
+    while (paragraph.length < minimum && !lines[index + 1]?.trim() && isPlainParagraph(lines[index + 2] || '') && !lines[index + 2]?.startsWith('```')) {
       const next = lines[index + 2].trim();
       const separator = /[a-zA-Z0-9.,!?]$/.test(paragraph) && /^[a-zA-Z0-9]/.test(next) ? ' ' : '';
       if (paragraph.length + separator.length + next.length > maximum) break;
