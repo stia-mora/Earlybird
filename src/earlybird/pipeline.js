@@ -218,9 +218,28 @@ export function createArticlePipeline({
       const job = await prisma.earlyBirdArticleJob.findUnique({ where: { id: jobId }, include: { post: true, source: true, draft: true } });
       if (!job) throw new Error(`EarlyBird job not found: ${jobId}`);
       if (job.status === 'merged') return job;
+      if (job.status === 'dropped' && !force) return job;
       if (job.draft?.mediaId && job.status === 'verified' && !force) return job;
       const priorMetadata = jobMetadata(job);
+      const minNewsworthy = configuredNumber('EARLYBIRD_NEWSWORTHY_THRESHOLD', 6);
       try {
+        if (!preselectedDecision && !force) {
+          const screening = typeof editorialOrchestrator.screen === 'function'
+            ? await editorialOrchestrator.screen({ job })
+            : null;
+          if (screening && (!screening.hasConcreteFact || screening.newsworthy < minNewsworthy)) {
+            const metadata = sanitizeJsonUnicode({ ...priorMetadata, screening });
+            await saveReview(prisma, job, 'screening', 1, screening, JSON.stringify(screening));
+            return prisma.earlyBirdArticleJob.update({
+              where: { id: job.id },
+              data: {
+                status: 'dropped',
+                error: `新闻价值初筛未通过（得分 ${screening.newsworthy}/${minNewsworthy}，具体事实：${screening.hasConcreteFact ? '有' : '无'}）：${screening.reason}`,
+                metadata,
+              },
+            });
+          }
+        }
         await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'editorial_review', attempts: { increment: 1 }, error: null } });
         const candidates = await candidateJobs(prisma, job, { dailyReview, now: now() });
         let triage = preselectedDecision || await editorialOrchestrator.triage({ job, candidates });
@@ -309,6 +328,7 @@ export function createArticlePipeline({
           metadata = metadataWithReview(metadata, editorial, quality);
           await saveReview(prisma, job, 'draft', attempt, quality, candidate.markdown);
           const hash = reviewInputHash(candidate.markdown);
+          if (quality.title) candidate.title = quality.title;
           if (quality.decision === 'pass') { article = candidate; break; }
           if (quality.decision === 'merge') {
             if (quality.relatedJobIds.length && mergeDepth < 1) {

@@ -20,7 +20,7 @@ import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
 import { availableFixedEndVisuals } from '../src/earlybird/fixedEndVisuals.js';
 import { buildCoverPrompt, createCoverImageGenerator, normalizeCoverImage, WECHAT_COVER_SIZE } from '../src/earlybird/coverImage.js';
-import { createEditorialOrchestrator, createEditorialReviewer, draftQualityIssues, normalizeEditorialDecision } from '../src/earlybird/editorialReview.js';
+import { createEditorialOrchestrator, createEditorialReviewer, draftQualityIssues, normalizeEditorialDecision, normalizeScreening } from '../src/earlybird/editorialReview.js';
 import { gatherEditorialResearch, normalizeResearchPlan, selectEditorialResearch } from '../src/earlybird/editorialResearch.js';
 import { createEditorialXSearch } from '../src/earlybird/xResearchSearch.js';
 import { collectTavilyImages, createTavilyImageSearch, normalizeTavilyImageResult } from '../src/earlybird/tavilyImageSearch.js';
@@ -340,6 +340,26 @@ describe('independent editorial review', () => {
     expect(decision.selectedResearchUrls).toEqual(['https://x.com/openai/status/200']);
     expect(client.complete.mock.calls[0][0].system).toContain('主动检索');
   });
+
+  it('screens news value and filters routine remarks or unverified chatter', async () => {
+    const lowValue = normalizeScreening({ newsworthy: 3, hasConcreteFact: false, reason: '日常表态，无具体产品数字' });
+    expect(lowValue.newsworthy).toBe(3);
+    expect(lowValue.hasConcreteFact).toBe(false);
+
+    const highValue = normalizeScreening({ newsworthy: 9, hasConcreteFact: true, reason: '发布新模型并公布核心基准跑分' });
+    expect(highValue.newsworthy).toBe(9);
+    expect(highValue.hasConcreteFact).toBe(true);
+
+    const fallbackValue = normalizeScreening(null);
+    expect(fallbackValue.newsworthy).toBe(8);
+    expect(fallbackValue.hasConcreteFact).toBe(true);
+
+    const client = { complete: vi.fn(async () => ({ newsworthy: 2, hasConcreteFact: false, reason: '一句话随想' })) };
+    const orchestrator = createEditorialOrchestrator({ client });
+    const result = await orchestrator.screen({ job });
+    expect(result.newsworthy).toBe(2);
+    expect(result.hasConcreteFact).toBe(false);
+  });
 });
 
 describe('editorial research', () => {
@@ -447,6 +467,9 @@ describe('thread assembly and humanizer', () => {
   it('penalizes common AI traces', () => {
     expect(scoreHumanized('值得注意的是，在当今生态中不仅如此而且如此。')).toBeLessThan(45);
   });
+  it('penalizes bureaucratic phrases alongside AI traces', () => {
+    expect(scoreHumanized('这表明该技术意味着巨大突破，凸显了团队实力，彰显了雄心，迈出了坚实一步，产生深远影响。')).toBeLessThan(45);
+  });
   it('does not let humanization collapse an event story into a summary', async () => {
     const markdown = `## 时间线\n\n${'官方消息提供了可核查的时间线与发布范围。'.repeat(70)}`;
     const result = await humanize({ client: { complete: async () => ({ markdown: '一句摘要。', score: 50 }) }, markdown, context: { editorial: { contentType: 'event' } } });
@@ -507,12 +530,11 @@ describe('thread assembly and humanizer', () => {
     expect(fullWidthPunctuation('模型已经上线.')).toBe('模型已经上线。');
     expect(fullWidthPunctuation('Grok Image 2.0 模型上线, 并支持多场景.')).toBe('Grok Image 2.0 模型上线，并支持多场景。');
   });
-  it('alternates two-sentence and one-sentence body paragraphs', () => {
+  it('preserves natural body paragraphs instead of mechanically splitting them', () => {
     const first = `第一句交代官方发布的核心背景和读者需要了解的信息范围，以保证段落具备足够的信息密度。第二句补充这个变化对现有使用流程的具体影响，而不只是重复官方的宣传用语。`;
     const second = `第一句继续解释新能力如何连接到实际场景，使读者能够看到它与旧版本之间的清晰区别。第二句将可以继续观察的问题留给读者，让结尾不会成为空洞的总结。`;
     const varied = varyEditorialParagraphs(`${first}\n\n${second}`);
-    expect(varied).toContain(first);
-    expect(varied).toContain('第一句继续解释新能力如何连接到实际场景，使读者能够看到它与旧版本之间的清晰区别。\n\n第二句将可以继续观察的问题留给读者，让结尾不会成为空洞的总结。');
+    expect(varied).toBe(`${first}\n\n${second}`);
   });
   it('merges adjacent fragments into a complete reading paragraph', () => {
     const compact = compactEditorialMarkdown('第一句话只交代了背景。\n\n第二句话补足了读者理解这件事所需的关键事实。');
@@ -717,6 +739,48 @@ describe('editorial article pipeline', () => {
       if (originalThreadWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
       else process.env.EARLYBIRD_THREAD_WAIT_MS = originalThreadWait;
     }
+  });
+
+  it('drops a low-value job at the news screening gate before triage or drafting', async () => {
+    const post = { id: 'p-drop', postId: 'drop-1', authorUsername: 'someone', sourceUrl: 'https://x.com/someone/status/drop-1', text: '锁定方向做简化，把不必要的功能全部去掉。', rawData: { id: 'drop-1', text: '锁定方向做简化。' }, createdAt: new Date() };
+    const job = { id: 'j-drop', status: 'detected', metadata: {}, detectedAt: new Date(), postId: post.id, sourceId: 's-drop', post, source: { handle: 'someone' }, draft: null };
+    const updates = [];
+    const prisma = {
+      earlyBirdArticleJob: {
+        findUnique: vi.fn(async () => job),
+        update: vi.fn(async ({ where, data }) => { updates.push(data); return { ...job, ...data }; }),
+      },
+      earlyBirdEditorialReview: { create: vi.fn(async ({ data }) => data) },
+    };
+    const reviewer = {
+      screen: vi.fn(async () => ({ newsworthy: 2, hasConcreteFact: false, reason: '日常表态，无具体产品或事实' })),
+      triage: vi.fn(),
+    };
+    const pipeline = createArticlePipeline({ prisma, reviewer });
+    const result = await pipeline.process(job.id);
+    expect(result.status).toBe('dropped');
+    expect(result.error).toContain('新闻价值初筛未通过');
+    expect(reviewer.triage).not.toHaveBeenCalled();
+    expect(updates).toContainEqual(expect.objectContaining({ status: 'dropped' }));
+  });
+
+  it('produces candidate titles and allows reviewer to pick the best title', async () => {
+    const client = {
+      complete: vi.fn(async () => ({
+        title: 'OpenAI被抓包！ChatGPT竟然知道你在别的网站买了什么',
+        candidateTitles: [
+          'OpenAI被抓包！ChatGPT竟然知道你在别的网站买了什么',
+          'ChatGPT曝出隐私争议：第三方数据被读取',
+        ],
+        digest: '最新曝光的隐私机制引发争议。',
+        markdown: `![证据图](data/test.png)\n\n这波属实离谱。OpenAI 旗下 ChatGPT 再次引发争议。\n\n${'核心事实细节说明，官方给出明确回应。'.repeat(30)}`,
+      })),
+    };
+    const writer = createArticleWriter({ client });
+    const post = { id: 'p-titles', text: 'ChatGPT privacy issue.' };
+    const article = await writer.write({ post, editorial: { contentType: 'brief' }, assets: [{ kind: 'image', localPath: 'data/test.png' }] });
+    expect(article.candidateTitles).toHaveLength(2);
+    expect(article.title).toBe('OpenAI被抓包！ChatGPT竟然知道你在别的网站买了什么');
   });
 });
 
