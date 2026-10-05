@@ -107,12 +107,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["node", "src/earlybird/worker.js"]
+    command: ["sh", "-c", "npx prisma db push --skip-generate && node src/earlybird/worker.js"]
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"process.exit(0)\""]
+      test: ["CMD-SHELL", "node -e \"import('./src/earlybird/index.js').then(() => process.exit(0)).catch(() => process.exit(1))\""]
       interval: 30s
       timeout: 10s
-      start_period: 10s
+      start_period: 15s
       retries: 3
 
 volumes:

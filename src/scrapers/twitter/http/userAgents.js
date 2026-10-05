@@ -1,78 +1,14 @@
 // Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
 
-export const PROFILES = Object.freeze([
-  Object.freeze({
-    id: "chrome-windows",
-    browser: "chrome",
-    engine: "chromium",
-    platform: "windows",
-    version: "151.0.0.0",
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-    acceptLanguage: "en-US,en;q=0.9",
-    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    acceptEncoding: "gzip, deflate, br, zstd",
-    secChUa: "\"Not=A?Brand\";v=\"99\", \"Google Chrome\";v=\"151\", \"Chromium\";v=\"151\"",
-    secChUaMobile: "?0",
-    secChUaPlatform: "\"Windows\"",
-  }),
-  Object.freeze({
-    id: "chrome-macos",
-    browser: "chrome",
-    engine: "chromium",
-    platform: "macos",
-    version: "151.0.0.0",
-    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-    acceptLanguage: "en-US,en;q=0.9",
-    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    acceptEncoding: "gzip, deflate, br, zstd",
-    secChUa: "\"Not=A?Brand\";v=\"99\", \"Google Chrome\";v=\"151\", \"Chromium\";v=\"151\"",
-    secChUaMobile: "?0",
-    secChUaPlatform: "\"macOS\"",
-  }),
-  Object.freeze({
-    id: "chrome-linux",
-    browser: "chrome",
-    engine: "chromium",
-    platform: "linux",
-    version: "151.0.0.0",
-    userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-    acceptLanguage: "en-US,en;q=0.9",
-    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    acceptEncoding: "gzip, deflate, br, zstd",
-    secChUa: "\"Not=A?Brand\";v=\"99\", \"Google Chrome\";v=\"151\", \"Chromium\";v=\"151\"",
-    secChUaMobile: "?0",
-    secChUaPlatform: "\"Linux\"",
-  }),
-  Object.freeze({
-    id: "edge-windows",
-    browser: "edge",
-    engine: "chromium",
-    platform: "windows",
-    version: "151.0.0.0",
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
-    acceptLanguage: "en-US,en;q=0.9",
-    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    acceptEncoding: "gzip, deflate, br, zstd",
-    secChUa: "\"Not=A?Brand\";v=\"99\", \"Microsoft Edge\";v=\"151\", \"Chromium\";v=\"151\"",
-    secChUaMobile: "?0",
-    secChUaPlatform: "\"Windows\"",
-  }),
-  Object.freeze({
-    id: "firefox-windows",
-    browser: "firefox",
-    engine: "gecko",
-    platform: "windows",
-    version: "153.0",
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
-    acceptLanguage: "en-US,en;q=0.9",
-    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    acceptEncoding: "gzip, deflate, br, zstd",
-    secChUa: null,
-    secChUaMobile: null,
-    secChUaPlatform: null,
-  }),
+/**
+ * Modern user agent strings for Twitter HTTP client emulation.
+ * @type {readonly string[]}
+ */
+export const USER_AGENT_STRINGS = Object.freeze([
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
 ]);
 
-export const DEFAULT_PROFILE_ID = "chrome-windows";
-
-export const USER_AGENT_STRINGS = Object.freeze(PROFILES.map((profile) => profile.userAgent));

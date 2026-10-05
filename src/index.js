@@ -3,6 +3,9 @@
  * EarlyBird - Autonomous AI Tech News Pipeline powered by Pi Agent
  *
  * Curation, verification, humanized writing, and WeChat Official Account publishing.
+ *
+ * @author nich (@nichxbt)
+ * @license Apache-2.0
  */
 
 export * from './earlybird/index.js';

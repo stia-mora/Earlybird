@@ -59,6 +59,6 @@ RUN groupadd -r earlybird && useradd -r -g earlybird -G audio,video earlybird \
 USER earlybird
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD node -e "process.exit(0)"
+    CMD node -e "import('./src/earlybird/index.js').then(() => process.exit(0)).catch(() => process.exit(1))"
 
 CMD ["node", "src/earlybird/worker.js"]

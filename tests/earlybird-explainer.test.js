@@ -80,8 +80,12 @@ describe('explainer reading and visual standards', () => {
 describe('complete visual-plan collection over HTTP', () => {
   it('searches all story nodes beyond five images, even with five existing assets', async () => {
     const names = ['claude', 'deepseek', 'gemini', 'gpt', 'grok', 'logo', 'icon-192', 'icon-512'];
-    const pngHeader = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082', 'hex');
-    const buffers = names.map((_name, index) => Buffer.concat([pngHeader, Buffer.from([index])]));
+    // Valid 1x1 transparent PNG payload used to serve unique test image responses
+    const MINIMAL_PNG_BYTES = Buffer.from(
+      '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082',
+      'hex'
+    );
+    const buffers = names.map((_name, index) => Buffer.concat([MINIMAL_PNG_BYTES, Buffer.from([index])]));
     const queries = [];
     const server = createServer(async (request, response) => {
       if (request.url === '/search') {

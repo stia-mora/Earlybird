@@ -33,7 +33,7 @@ import { TwitterHttpClient } from './client.js';
 import { AuthError, RateLimitError, TwitterApiError } from './errors.js';
 import { resolveCacheDir } from './queryIds.js';
 
-export function parseCookieInput(text) {
+function parseCookieInput(text) {
   if (!text) return [];
   const trimmed = String(text).trim();
   if (!trimmed) return [];
@@ -43,24 +43,24 @@ export function parseCookieInput(text) {
       const parsed = JSON.parse(trimmed);
       const cookies = Array.isArray(parsed) ? parsed : (parsed.cookies || []);
       return cookies
-        .map((c) => ({ name: c.name || c.Name, value: c.value || c.Value }))
-        .filter((c) => Boolean(c.name));
+        .map((cookie) => ({ name: cookie.name || cookie.Name, value: cookie.value || cookie.Value }))
+        .filter((cookie) => Boolean(cookie.name));
     } catch {}
   }
 
   const lines = trimmed.split(/[\r\n]+/);
   const result = [];
-  for (const line of lines) {
-    const l = line.trim();
-    if (!l || l.startsWith('#')) continue;
-    if (l.includes('\t')) {
-      const parts = l.split('\t');
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (line.includes('\t')) {
+      const parts = line.split('\t');
       if (parts.length >= 7) {
         result.push({ name: parts[5], value: parts[6] });
         continue;
       }
     }
-    for (const pair of l.split(';')) {
+    for (const pair of line.split(';')) {
       const idx = pair.indexOf('=');
       if (idx > 0) {
         result.push({

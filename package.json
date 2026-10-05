@@ -22,15 +22,12 @@
     "@earendil-works/pi-agent-core": "^1.0.3",
     "@earendil-works/pi-ai": "^1.0.3",
     "@prisma/client": "^5.7.1",
-    "axios": "^1.15.2",
     "better-sqlite3": "^11.10.0",
     "bull": "^4.12.0",
     "dotenv": "^16.3.1",
-    "marked": "^17.0.3",
     "node-cron": "^4.6.0",
     "prisma": "^5.7.1",
     "puppeteer": "^24.34.0",
-    "redis": "^4.6.11",
     "undici": "^7.22.0"
   },
   "devDependencies": {
