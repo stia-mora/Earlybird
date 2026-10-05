@@ -14,4 +14,8 @@ export * from './articleWriter.js';
 export * from './humanizer.js';
 export * from './gzhRenderer.js';
 export * from './wechatClient.js';
+export * from './agentTools.js';
+export * from './agentStream.js';
+export * from './authorAgent.js';
+export * from './criticAgent.js';
 export * from './pipeline.js';

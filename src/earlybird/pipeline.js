@@ -17,6 +17,9 @@ import { emptyEditorialResearch, gatherEditorialResearch, hasResearchPlan, selec
 import { createEditorialXSearch } from './xResearchSearch.js';
 import { shanghaiDayRange } from './dailySummary.js';
 import { isNonemptyFile, postUrl, sanitizeJsonUnicode } from './utils.js';
+import { createEarlyBirdTools } from './agentTools.js';
+import { createAuthorAgent } from './authorAgent.js';
+import { createCriticAgent } from './criticAgent.js';
 
 const MAX_REWRITE_ATTEMPTS = 3;
 
@@ -197,10 +200,21 @@ export function createArticlePipeline({
   wechatClient = createWeChatClient(), mediaPipeline = createMediaPipeline({ prisma }), evidence = captureEvidence,
   analyze = analyzePost, notifier = createHermesNotifier({ prisma }), coverImageGenerator = createCoverImageGenerator(),
   imageSearch = createTavilyImageSearch(), xSearch, collectWebImages = collectTavilyImages, logger = console, now = () => new Date(),
+  tools, authorAgent, criticAgent, usePiAgent = process.env.EARLYBIRD_USE_PI_AGENT === 'true',
 } = {}) {
-  const writer = createArticleWriter({ client: llmClient });
-  const editorialOrchestrator = orchestrator || reviewer || createEditorialOrchestrator({ client: reviewClient || llmClient });
   const editorialXSearch = xSearch || createEditorialXSearch({ scraperFactory, logger });
+  const agentTools = tools || createEarlyBirdTools({
+    scraperFactory,
+    imageSearch,
+    tavilySearch: imageSearch,
+    evidence,
+    xSearch: editorialXSearch,
+    logger,
+  });
+  const author = authorAgent || (usePiAgent ? createAuthorAgent({ client: llmClient, tools: agentTools, logger }) : null);
+  const writer = author || createArticleWriter({ client: llmClient });
+  const critic = criticAgent || (usePiAgent ? createCriticAgent({ client: reviewClient || llmClient, tools: agentTools, logger }) : null);
+  const editorialOrchestrator = orchestrator || reviewer || critic || createEditorialOrchestrator({ client: reviewClient || llmClient });
 
   async function manualReview(job, metadata, reason) {
     const updated = await prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'manual_review', error: reason, metadata } });
