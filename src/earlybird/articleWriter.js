@@ -14,7 +14,7 @@ function stripInlineMarkdown(value) {
   return String(value || '')
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/__([^_\n]+)__/g, '$1')
-    .replace(/(^|[\s（［【「“])\*([^*\n]+)\*(?=[\s，。！？；：）］】」”]|$)/g, '$1$2');
+    .replace(/\*([^*\n]+)\*/g, '$1');
 }
 
 function splitParagraph(value, maximum) {
@@ -27,6 +27,7 @@ function splitParagraph(value, maximum) {
     let end = -1;
     for (let index = window.length - 1; index >= Math.floor(maximum * 0.55); index -= 1) {
       if ('。！？；，、：'.includes(window[index])) { end = index + 1; break; }
+      if (end < 0 && ('.!?'.includes(window[index]) || window[index] === ' ')) { end = index + 1; }
     }
     if (end < 0) end = window.length;
     parts.push(text.slice(start, start + end).trim());
@@ -43,7 +44,7 @@ export function compactEditorialMarkdown(markdown, maximum = MAX_PARAGRAPH_LENGT
   for (const raw of lines) {
     const line = raw.trimEnd();
     if (line.startsWith('```')) { inCode = !inCode; normalized.push(line); continue; }
-    if (inCode || !line.trim() || /^!\[[^\]]*\]\([^)]+\)$/.test(line)) { normalized.push(line); continue; }
+    if (inCode || !line.trim() || /^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(line)) { normalized.push(line.trim()); continue; }
     const heading = line.match(/^(#{1,6}\s+)(.+)$/);
     if (heading) { normalized.push(`${heading[1]}${stripInlineMarkdown(heading[2])}`); continue; }
     const list = line.match(/^[-*+]\s+(.+)$/);
@@ -56,7 +57,7 @@ export function compactEditorialMarkdown(markdown, maximum = MAX_PARAGRAPH_LENGT
 export function sanitizeEditorialMarkdown(markdown, { preserveParagraphs = false } = {}) {
   const lines = compactEditorialMarkdown(markdown, MAX_PARAGRAPH_LENGTH, { mergeShort: !preserveParagraphs }).split('\n');
   return lines.map(line => {
-    if (!line.trim() || /^#{1,6}\s+/.test(line) || /^!\[[^\]]*\]\([^)]+\)$/.test(line)) return line;
+    if (!line.trim() || /^#{1,6}\s+/.test(line) || /^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(line)) return line.trim();
     const prefix = line.match(/^[-*+]\s+/)?.[0] || '';
     const text = prefix ? line.slice(prefix.length) : line;
     const sentences = text.match(/[^。！？]+[。！？]?/g) || [text];
@@ -72,11 +73,14 @@ function proseSentences(text) {
     const character = text[index];
     const next = text[index + 1] || '';
     const boundary = '。！？'.includes(character)
-      || ('.!?'.includes(character) && (!next || /\s/.test(next)));
+      || ('.!?'.includes(character) && (!next || /[\s”’"\'）］】」』]/.test(next)));
     if (!boundary) continue;
-    const sentence = text.slice(start, index + 1).trim();
+    let end = index + 1;
+    while (end < text.length && '”’"\'）］】」』'.includes(text[end])) end += 1;
+    const sentence = text.slice(start, end).trim();
     if (sentence) sentences.push(sentence);
-    start = index + 1;
+    start = end;
+    index = end - 1;
   }
   const remaining = text.slice(start).trim();
   if (remaining) sentences.push(remaining);
@@ -110,7 +114,7 @@ export function prepareEditorialMarkdown(markdown, contentType) {
 function isPlainParagraph(line) {
   return line.trim()
     && !/^#{1,6}\s+/.test(line)
-    && !/^!\[[^\]]*\]\([^)]+\)$/.test(line)
+    && !/^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(line)
     && !/^[-*+]\s+/.test(line)
     && !/^>\s?/.test(line)
     && !line.startsWith('```');
@@ -124,8 +128,9 @@ function mergeShortParagraphs(lines, minimum, maximum) {
     let paragraph = line.trim();
     while (paragraph.length < minimum && !lines[index + 1]?.trim() && isPlainParagraph(lines[index + 2] || '')) {
       const next = lines[index + 2].trim();
-      if (paragraph.length + next.length > maximum) break;
-      paragraph += next;
+      const separator = /[a-zA-Z0-9.,!?]$/.test(paragraph) && /^[a-zA-Z0-9]/.test(next) ? ' ' : '';
+      if (paragraph.length + separator.length + next.length > maximum) break;
+      paragraph += separator + next;
       index += 2;
     }
     merged.push(paragraph);
@@ -138,7 +143,7 @@ export function hasCompactPresentation(markdown, maximum = MAX_PARAGRAPH_LENGTH)
   for (const raw of String(markdown || '').replace(/\r/g, '').split('\n')) {
     const line = raw.trim();
     if (line.startsWith('```')) { inCode = !inCode; continue; }
-    if (inCode || !line || /^#{1,6}\s+/.test(line) || /^!\[[^\]]*\]\([^)]+\)$/.test(line)) continue;
+    if (inCode || !line || /^#{1,6}\s+/.test(line) || /^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(line)) continue;
     if (line.includes('*') || /__[^_\n]+__/.test(line) || stripInlineMarkdown(line).replace(/^[-+]\s+/, '').length > maximum) return false;
   }
   return true;
@@ -161,7 +166,7 @@ export function markdownHeadingCount(markdown) {
 }
 
 export function markdownImagePaths(markdown) {
-  return [...String(markdown || '').matchAll(/^!\[[^\]]*\]\(([^)]+)\)$/gm)].map(match => match[1]);
+  return [...String(markdown || '').matchAll(/^\s*!\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)\s*$/gm)].map(match => match[1].trim());
 }
 
 export function articleVisualAssets(assets = []) {
@@ -210,7 +215,7 @@ export function editorialStructureIssues(markdown, contentType, visualAssets = [
   const paths = markdownImagePaths(markdown).map(normalizePath);
   if (new Set(paths.filter(path => allowedPaths.has(path))).size < requiredVisuals) issues.push(`需要插入至少 ${requiredVisuals} 张不同的真实素材图片`);
   if (paths.some(path => !allowedPaths.has(path))) issues.push('存在未提供的正文图片路径');
-  if (contentType === 'explainer' && [...String(markdown || '').matchAll(/^!\[([^\]]*)\]\([^)]+\)$/gm)].some(match => !match[1].trim())) issues.push('每张解读配图必须有图下注释');
+  if (contentType === 'explainer' && [...String(markdown || '').matchAll(/^\s*!\[([^\]]*)\]\([^)]+\)\s*$/gm)].some(match => !match[1].trim())) issues.push('每张解读配图必须有图下注释');
   if (!['explainer', 'event'].includes(contentType)) return [...new Set(issues)];
   const headings = markdownHeadingCount(markdown);
   if (headings < 3 || headings > 5) issues.push('需要 3 至 5 个叙事性二级或三级标题');

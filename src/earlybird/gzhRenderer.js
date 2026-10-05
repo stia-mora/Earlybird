@@ -133,7 +133,7 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
       sections.push(current);
       continue;
     }
-    if (line.startsWith('# ')) continue;
+    if (line.trim().startsWith('# ')) continue;
     if (line.trim()) {
       if (!firstContentSeen && normalizedTitle(line) === normalizedTitle(safeTitle)) { firstContentSeen = true; continue; }
       firstContentSeen = true;
@@ -162,7 +162,7 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
         html += `<section style="margin:20px 10px;padding:14px;background:#27272A;color:#FFFFFF;overflow-x:auto;"><p style="font-size:13px;line-height:1.6;margin:0;"><span leaf="">${escapeHtml(item.content)}</span></p></section>`;
         continue;
       }
-      const image = item.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      const image = item.trim().match(/^!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)$/);
       if (image) {
         const caption = sanitizeEditorialMarkdown(image[1]).replace(/\s*\n\s*/g, ' ');
         html += `<img src="${escapeHtml(image[2])}" alt="${escapeHtml(caption)}" style="max-width:100%;height:auto;display:block;margin:20px auto;">`;
@@ -177,8 +177,8 @@ export async function renderGzhMarkdown(markdown, { title, digest, contentType, 
         }
         continue;
       }
-      if (/^[-*]\s+/.test(item)) {
-        const listText = item.replace(/^[-*]\s+/, '');
+      if (/^[-*+]\s+/.test(item)) {
+        const listText = item.replace(/^[-*+]\s+/, '');
         const emphasis = highlightBudget > 0 ? findHighlightPhrase(listText) : '';
         if (emphasis) highlightBudget -= 1;
         html += `<p style="${BODY}padding-left:14px;"> <span leaf="">• </span>${inline(listText, emphasis)}</p>`;

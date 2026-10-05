@@ -947,6 +947,9 @@ describe('cover image pipeline integration', () => {
     it('pairs Chinese quotation marks correctly for double and single quotes', () => {
       expect(fullWidthPunctuation('"测试内容"发布了"新模型"')).toBe('“测试内容”发布了“新模型”');
       expect(fullWidthPunctuation('\'核心能力\'')).toBe('‘核心能力’');
+      expect(fullWidthPunctuation('"核心能力。"')).toBe('“核心能力。”');
+      expect(fullWidthPunctuation('\'技术突破！\'')).toBe('‘技术突破！’');
+      expect(fullWidthPunctuation('他说："今天发布新模型。"')).toBe('他说：“今天发布新模型。”');
       expect(fullWidthPunctuation('English text "quoted" and don\'t change.')).toBe('English text "quoted" and don\'t change.');
     });
 
@@ -955,6 +958,60 @@ describe('cover image pipeline integration', () => {
       const markdown = `这是第一段内容，详细说明技术更新的来龙去脉与具体影响。${'这是正文文字。'.repeat(30)}\n\n![测试图片](data/earlybird/media/test.jpg)`;
       const issues = editorialStructureIssues(markdown, 'brief', visualAssets);
       expect(issues.some(issue => issue.includes('真实素材图片'))).toBe(false);
+    });
+
+    it('strips single-asterisk inline markdown inside Chinese text without spaces', () => {
+      const text = '这是一个*重要*的模型更新，带来了*实质性*的性能提升。';
+      const cleaned = compactEditorialMarkdown(text);
+      expect(cleaned).toBe('这是一个重要的模型更新，带来了实质性的性能提升。');
+      expect(hasCompactPresentation(cleaned)).toBe(true);
+    });
+
+    it('keeps closing quotation marks attached to the preceding sentence when breaking paragraphs', () => {
+      const input = [
+        '官方在说明中指出：“系统通过了全部基准测试。”这一结论随后得到验证。',
+        '第二段也是两句话。继续提供上下文事实。',
+      ].join('\n\n');
+      const varied = varyEditorialParagraphs(input);
+      const paragraphs = varied.split('\n\n').filter(p => !p.startsWith('#') && !p.startsWith('!'));
+      expect(paragraphs[0]).toContain('：“系统通过了全部基准测试。”');
+      expect(paragraphs.some(p => p.startsWith('”'))).toBe(false);
+    });
+
+    it('tolerates leading and trailing whitespace on image lines and list items in markdown parsing and gzh renderer', async () => {
+      const visualAssets = [{ localPath: 'data/media/test.png', kind: 'image', sourceUrl: 'https://x.com/img' }];
+      const markdown = `这是第一段说明。${'这是正文文字。'.repeat(30)}\n\n  ![测试说明](data/media/test.png)  \n\n+ 这是加号列表项\n\n- 这是减号列表项`;
+      const issues = editorialStructureIssues(markdown, 'brief', visualAssets);
+      expect(issues.filter(issue => issue.includes('真实素材图片') || issue.includes('未提供'))).toEqual([]);
+
+      const html = await renderGzhMarkdown(markdown, { title: '测试', digest: '摘要' });
+      expect(html).toContain('<img src="data/media/test.png"');
+      expect(html).toContain('• </span><span leaf="">这是加号列表项</span>');
+      expect(html).toContain('• </span><span leaf="">这是减号列表项</span>');
+      expect(html).not.toContain('<p style="font-size:15px;color:#52525B;line-height:1.8;margin:0 0 18px;"><span leaf="">![测试说明]');
+    });
+
+    it('resets cached WeChat token when API returns token expiry or invalidation errors', async () => {
+      let callCount = 0;
+      const fetchImpl = vi.fn(async (url) => {
+        if (url.includes('/cgi-bin/token')) {
+          callCount += 1;
+          return { ok: true, json: async () => ({ access_token: `token-${callCount}`, expires_in: 7200 }) };
+        }
+        if (url.includes('/cgi-bin/draft/get')) {
+          if (callCount === 1) {
+            return { ok: false, json: async () => ({ errcode: 40001, errmsg: 'invalid credential' }) };
+          }
+          return { ok: true, json: async () => ({ media_id: 'draft-1', news_item: [{ title: 'ok' }] }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+
+      const client = createWeChatClient({ appId: 'test-app', appSecret: 'test-secret', fetchImpl });
+      await expect(client.getDraft('draft-1')).rejects.toThrow('invalid credential');
+      // Token should have been cleared; next call must request a new token
+      await expect(client.getDraft('draft-1')).resolves.toMatchObject({ media_id: 'draft-1' });
+      expect(callCount).toBe(2);
     });
   });
 });

@@ -219,7 +219,7 @@ router.get('/jobs/:id', async (req, res) => {
 router.get('/jobs/:id/preview', async (req, res) => {
   const job = await prisma.earlyBirdArticleJob.findUnique({ where: { id: req.params.id }, select: { html: true, markdown: true, status: true } });
   if (!job) return res.status(404).json({ error: 'job not found' });
-  if (req.query.format === 'json' || req.headers.accept === 'application/json') return res.json(job);
+  if (req.query.format === 'json' || req.accepts(['json', 'html']) === 'json') return res.json(job);
   if (req.accepts('html')) return res.type('html').send(job.html || `<pre>${job.markdown || ''}</pre>`);
   res.json(job);
 });

@@ -93,7 +93,7 @@ export function createSourceMonitor({ prisma, queue, scraperFactory, now = () =>
           const newest = ordered.at(-1);
           const cursor = newest ? {
             lastSeenCreatedAt: newest.createdAt ? new Date(newest.createdAt) : null,
-            lastSeenPostId: newest.id || null,
+            lastSeenPostId: newest.id ? String(newest.id) : null,
           } : {};
           await prisma.earlyBirdSource.update({ where: { id: source.id }, data: {
             baselineComplete: true, ...cursor,

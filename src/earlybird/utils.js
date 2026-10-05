@@ -105,7 +105,7 @@ export function sanitizeJsonUnicode(value) {
 export function fullWidthPunctuation(text) {
   const value = String(text || '');
   const replacements = { ',': '，', '.': '。', '!': '！', '?': '？', ':': '：', ';': '；', '(': '（', ')': '）' };
-  const isChinese = character => /[\u3400-\u9FFF]/.test(character || '');
+  const isChinese = character => /[\u3400-\u9FFF\u3000-\u303F\uFF00-\uFFEF\u2018-\u201D\u2014\u2026]/.test(character || '');
 
   let doubleQuoteOpen = false;
   let singleQuoteOpen = false;
@@ -134,7 +134,7 @@ export function fullWidthPunctuation(text) {
     if (!replacements[character]) return character;
     // Preserve punctuation inside English prose, URLs, contractions, and versions such as Image 2.0.
     return isChinese(value[index - 1]) || isChinese(value[index + 1]) ? replacements[character] : character;
-  }).join('').replace(/([，。！？；：])\s+(?=[\u3400-\u9FFF])/g, '$1');
+  }).join('').replace(/([，。！？；：])\s+(?=[\u3400-\u9FFF\u3000-\u303F\uFF00-\uFFEF\u2018-\u201D])/g, '$1');
 }
 
 export function escapeHtml(text) {
