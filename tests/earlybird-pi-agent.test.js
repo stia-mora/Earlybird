@@ -10,6 +10,7 @@ import {
   createCaptureTweetEvidenceTool,
   createRenderGzhDraftTool,
   createSearchXPostsTool,
+  createGenerateCoverImageTool,
   createPiStreamFn,
   createAuthorAgent,
   createCriticAgent,
@@ -103,15 +104,44 @@ describe('EarlyBird Pi Agent Architecture', () => {
       expect(result.details.results).toHaveLength(1);
     });
 
-    it('createEarlyBirdTools bundles all 5 standard tools', () => {
+    it('generate_cover_image tool generates 900x383 cover using agent custom prompt', async () => {
+      const coverImageGenerator = {
+        generate: vi.fn(async ({ prompt }) => ({
+          status: 'generated',
+          localPath: '/data/cover.jpg',
+          model: 'test-model',
+          width: 900,
+          height: 383,
+          aspect: '2.35:1',
+          prompt,
+        })),
+      };
+      const tool = createGenerateCoverImageTool({ coverImageGenerator });
+      expect(tool.name).toBe('generate_cover_image');
+
+      const result = await tool.execute('call-cover', {
+        prompt: 'a glowing robotic arm manipulating quantum circuits',
+        visualMetaphor: '以机械臂隐喻模型操控能力',
+      });
+      expect(result.isError).toBeFalsy();
+      expect(result.content[0].text).toContain('封面图生成成功');
+      expect(result.content[0].text).toContain('900x383');
+      expect(result.content[0].text).toContain('以机械臂隐喻模型操控能力');
+      expect(coverImageGenerator.generate).toHaveBeenCalledWith(expect.objectContaining({
+        prompt: 'a glowing robotic arm manipulating quantum circuits',
+      }));
+    });
+
+    it('createEarlyBirdTools bundles all 6 standard tools', () => {
       const tools = createEarlyBirdTools();
-      expect(tools).toHaveLength(5);
+      expect(tools).toHaveLength(6);
       const names = tools.map(t => t.name);
       expect(names).toContain('fetch_tweet_thread');
       expect(names).toContain('search_web_research');
       expect(names).toContain('capture_tweet_evidence');
       expect(names).toContain('render_gzh_draft');
       expect(names).toContain('search_x_posts');
+      expect(names).toContain('generate_cover_image');
     });
   });
 
@@ -198,6 +228,31 @@ describe('EarlyBird Pi Agent Architecture', () => {
       expect(article.candidateTitles).toHaveLength(3);
       expect(article.digest).toContain('最新开源模型发布');
       expect(article.markdown).toContain('这波属实离谱');
+    });
+
+    it('allows Author Agent to autonomously design cover prompt and metaphor', async () => {
+      const mockClient = {
+        complete: vi.fn(async () => ({
+          title: '量子计算新突破：彻底干翻传统算力？',
+          candidateTitles: ['量子计算新突破：彻底干翻传统算力？'],
+          digest: '最新量子芯片算力大幅突破。',
+          markdown: '这波属实离谱。全新量子芯片发布。\n\n算力提升显著。'.repeat(8),
+          coverPrompt: 'a glowing quantum crystal matrix cracking open with golden light in a deep blue void, no text',
+          coverDesign: {
+            visualMetaphor: '以破裂的水晶矩阵隐喻算力边界的打破',
+            prompt: 'a glowing quantum crystal matrix cracking open with golden light in a deep blue void, no text',
+          },
+        })),
+      };
+
+      const author = createAuthorAgent({ client: mockClient });
+      const article = await author.write({
+        post: { postId: 'p-quantum', text: 'Quantum breakthrough!' },
+        editorial: { contentType: 'brief' },
+      });
+
+      expect(article.coverPrompt).toContain('glowing quantum crystal');
+      expect(article.coverDesign.visualMetaphor).toContain('破裂的水晶矩阵');
     });
   });
 
@@ -552,6 +607,118 @@ describe('EarlyBird Pi Agent Architecture', () => {
       expect(threadRes.content[0].text).toContain('thread post');
       expect(threadRes.structuredContent.tweets[0].id).toBe('99999');
       expect(mockScraper.scrapeFullThread).toHaveBeenCalledWith('1234567890');
+    });
+
+    it('pipeline uses Agent cover prompt to generate WeChat thumbnail', async () => {
+      const originalWait = process.env.EARLYBIRD_THREAD_WAIT_MS;
+      process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
+      try {
+        const post = {
+          id: 'p-agent-cover',
+          postId: 'post-agent-cover',
+          authorUsername: 'openai',
+          sourceUrl: 'https://x.com/openai/status/post-agent-cover',
+          text: 'OpenAI Operator announced.',
+          rawData: { id: 'post-agent-cover', text: 'OpenAI Operator announced.' },
+          createdAt: new Date(),
+        };
+        const job = {
+          id: 'j-agent-cover',
+          status: 'detected',
+          metadata: {},
+          detectedAt: new Date(),
+          postId: post.id,
+          sourceId: 's-agent-cover',
+          post,
+          source: { handle: 'openai' },
+          draft: null,
+        };
+
+        const prisma = {
+          earlyBirdArticleJob: {
+            findUnique: vi.fn(async () => job),
+            findMany: vi.fn(async () => []),
+            update: vi.fn(async ({ data }) => ({ ...job, ...data })),
+          },
+          earlyBirdPost: { update: vi.fn(async () => ({})) },
+          earlyBirdAsset: { update: vi.fn(async () => ({})) },
+          earlyBirdDraft: { upsert: vi.fn(async () => ({ id: 'd-1', mediaId: 'media-agent-cover' })) },
+          earlyBirdEditorialReview: { create: vi.fn(async ({ data }) => data) },
+        };
+
+        const wechatClient = {
+          uploadPermanentMaterial: vi.fn(async () => ({ media_id: 'thumb-agent-cover' })),
+          uploadArticleImage: vi.fn(async () => ({ url: 'https://cdn.wechat/img' })),
+          addDraft: vi.fn(async () => ({ media_id: 'media-agent-cover' })),
+          getDraft: vi.fn(async () => ({ media_id: 'media-agent-cover', news_item: [{}] })),
+        };
+
+        const coverImageGenerator = {
+          generate: vi.fn(async ({ prompt }) => ({
+            status: 'generated',
+            localPath: '/data/cover-agent.jpg',
+            model: 'agent-image-model',
+            width: 900,
+            height: 383,
+            aspect: '2.35:1',
+            prompt,
+          })),
+        };
+
+        const authorAgent = {
+          write: vi.fn(async () => ({
+            title: 'Operator震撼登场！计算机自主操控时代来临',
+            candidateTitles: ['Operator震撼登场！计算机自主操控时代来临'],
+            digest: 'OpenAI 正式发布操作电脑智能体。',
+            markdown: '![证据](data/p1.png)\n\n开幕暴击。全新智能体接管桌面。'.repeat(8),
+            coverPrompt: 'a glowing robotic hand operating a holographic keyboard, neon blue circuits, minimalist 3D rendering, no text',
+            coverDesign: {
+              visualMetaphor: '以机械手操作全息键盘隐喻智能体接管桌面',
+              prompt: 'a glowing robotic hand operating a holographic keyboard, neon blue circuits, minimalist 3D rendering, no text',
+            },
+          })),
+        };
+
+        const criticAgent = {
+          screen: vi.fn(async () => ({ newsworthy: 9, hasConcreteFact: true, reason: 'high value' })),
+          triage: vi.fn(async () => ({ decision: 'pass', contentType: 'brief', qualityScore: 90, issues: [], rewriteInstructions: '', relatedJobIds: [], visualPlan: [] })),
+          reviewDraft: vi.fn(async () => ({
+            decision: 'pass',
+            contentType: 'brief',
+            qualityScore: 92,
+            title: 'Operator震撼登场！计算机自主操控时代来临',
+            issues: [],
+            rewriteInstructions: '',
+            relatedJobIds: [],
+            visualPlan: [],
+          })),
+        };
+
+        const llmClient = { complete: vi.fn(async () => ({ markdown: '开幕暴击。全新智能体接管桌面。'.repeat(8), score: 60 })) };
+
+        const pipeline = createArticlePipeline({
+          prisma,
+          scraperFactory: async () => ({ scrapeFullThread: async () => [post.rawData] }),
+          mediaPipeline: { collect: vi.fn(async () => [{ id: 'a-1', kind: 'image', localPath: 'data/p1.png' }]) },
+          evidence: vi.fn(async () => ({})),
+          analyze: vi.fn(async () => ({ translation: '', digest: '智能体发布', facts: ['Operator发布'] })),
+          wechatClient,
+          llmClient,
+          authorAgent,
+          criticAgent,
+          coverImageGenerator,
+        });
+
+        const result = await pipeline.process(job.id);
+        expect(result.status).toBe('verified');
+        expect(coverImageGenerator.generate).toHaveBeenCalledWith(expect.objectContaining({
+          prompt: 'a glowing robotic hand operating a holographic keyboard, neon blue circuits, minimalist 3D rendering, no text',
+        }));
+        expect(wechatClient.uploadPermanentMaterial).toHaveBeenCalledWith('/data/cover-agent.jpg', 'thumb');
+      } finally {
+        if (originalWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
+        else process.env.EARLYBIRD_THREAD_WAIT_MS = originalWait;
+      }
     });
   });
 });

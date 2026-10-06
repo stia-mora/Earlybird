@@ -17,6 +17,15 @@ const AUTHOR_SYSTEM_PROMPT = `你是中文科技深度报道资深主笔（风�
 2. search_web_research: 当原帖缺乏官方博客链接、关键技术指标未说明、存在需要求证的行业背景或评测跑分时，主动检索官方或权威来源。
 3. capture_tweet_evidence: 当需要对核心原帖进行视觉存证（作为文章插图），且现有素材中缺少该推文的高清截图时调用。
 4. render_gzh_draft: 在完成初稿后，调用此工具排版并自查 HTML 合规性（是否残留粗体语法、单段字数超限、图片缺失等）。根据校验反馈及时调整。
+5. generate_cover_image: 为文章构思并生成专属微信公众号封面图（900x383, 2.35:1 宽幅无字科技插画）。
+
+【封面图创作自主权（Agent 自主决策与画图）】
+你全权决定微信公众号封面的视觉创意！坚决拒绝千篇一律的无聊模板。
+你需要深入理解本次报道的真正内核，构思一个极具视觉冲击力与巧妙科技隐喻的英文 prompt：
+- 比如报道开源大模型爆发，可以构思："a towering luminous crystal matrix cracking open under quantum pressure, releasing vibrant golden plasma against a dark cobalt void, minimalist 3D editorial style, no text"；
+- 比如报道智能体操控界面（Computer Use），可以构思："a glowing robotic arm delicately adjusting an intricate holographic clockwork mechanism, dark cosmic background with cyan and warm amber rim lights, minimalist 3D rendering, no text"；
+- 比如报道算力突破，可以构思："macro photography of a futuristic optical photonic processor with pulsing coherent light beams, frosted glass and obsidian, dramatic volumetric lighting, no text"；
+你可以直接调用 generate_cover_image 工具出图；或者在最终 JSON 的 coverPrompt 字段中输出你构思的英文生图提示词，由系统执行生图。
 
 【新智元式文风黄金法则】
 1. 首句暴击（Hook）：开篇第一句绝不写背景铺陈（严禁“随着人工智能的发展…”、“近日…”），直接以重磅事实、反差或戏剧性冲突开局（如“这波属实离谱！”、“开源社区直接炸锅了！”、“一夜之间暴涨10倍，某某模型干翻全场！”）。
@@ -44,6 +53,11 @@ const AUTHOR_SYSTEM_PROMPT = `你是中文科技深度报道资深主笔（风�
   ],
   "digest": "吸引点击的摘要导读（12-60字）",
   "markdown": "完整排版好的 Markdown 正文（包含标题、插图和正文）",
+  "coverPrompt": "由你自主构思的英文封面生图提示词或视觉主体隐喻（若未调用工具出图，写在这里供系统生成）",
+  "coverDesign": {
+    "visualMetaphor": "中文构思说明：以什么隐喻表达什么",
+    "prompt": "英文生图提示词"
+  },
   "references": ["引用的来源链接列表"]
 }`;
 
@@ -118,6 +132,10 @@ export function createAuthorAgent({
 
       const parsed = extractJson(textContent);
       const prepare = md => prepareEditorialMarkdown(md, editorial.contentType);
+      const coverResultMsg = messages.find(m => m.role === 'toolResult' && m.toolName === 'generate_cover_image');
+      const agentGeneratedCover = coverResultMsg?.details?.status === 'generated' ? coverResultMsg.details : null;
+      const coverPrompt = parsed?.coverPrompt || parsed?.coverDesign?.prompt || (typeof parsed?.cover === 'string' ? parsed.cover : parsed?.cover?.prompt) || '';
+      const coverDesign = parsed?.coverDesign || (coverPrompt ? { prompt: coverPrompt } : null);
 
       if (parsed && parsed.markdown && parsed.title) {
         const preparedMarkdown = prepare(parsed.markdown);
@@ -128,6 +146,9 @@ export function createAuthorAgent({
             : [parsed.title],
           digest: parsed.digest || '',
           markdown: preparedMarkdown,
+          coverPrompt,
+          coverDesign,
+          generatedCover: agentGeneratedCover,
           references: parsed.references || [],
           toolsExecuted: messages.filter(m => m.role === 'toolResult').map(m => m.toolName),
         };
@@ -140,6 +161,9 @@ export function createAuthorAgent({
           candidateTitles: parsed?.candidateTitles || [parsed?.title || '深度解析'],
           digest: parsed?.digest || textContent.slice(0, 80),
           markdown: preparedMarkdown,
+          coverPrompt,
+          coverDesign,
+          generatedCover: agentGeneratedCover,
           references: parsed?.references || [],
           toolsExecuted: messages.filter(m => m.role === 'toolResult').map(m => m.toolName),
         };

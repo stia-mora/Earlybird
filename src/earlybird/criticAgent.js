@@ -45,6 +45,10 @@ const CRITIC_SYSTEM_PROMPT = `你是独立于撰稿作者的【最高事实核�
 5. 标题审定（Title Picking）：
    - 从草稿提供的 candidateTitles 中，挑出最具冲击力、最真实、最契合新智元风格的标题，作为选定的 title 输出。
 
+6. 封面图设计审校（Cover Image Quality & Metaphor）：
+   - 若草稿提供了封面设计（coverPrompt/coverDesign）或调用了 generate_cover_image，检查封面视觉隐喻是否切中本次报道的技术本质。
+   - 严禁封面要求渲染文字乱码，严禁生搬推文截图作为封面。
+
 【评分与放行门槛】
 - 自动通过 (pass) 的最低标准为 85 分（满分 100）。
 - 只要命中上述任一缺陷（尤其是未翻译外文、破损截图、AI腔、事实存疑），评分必须压至 70 分以下，决策强制判为 rewrite 或 drop！
@@ -134,6 +138,9 @@ export function createCriticAgent({
         currentTitle: article?.title,
         digest: article?.digest,
         markdown: article?.markdown,
+        coverPrompt: article?.coverPrompt || article?.coverDesign?.prompt,
+        coverDesign: article?.coverDesign,
+        generatedCover: article?.generatedCover,
         availableAssets: (assets || []).map(a => ({ localPath: a.localPath, sourceUrl: a.sourceUrl })),
         references,
         localIssues,

@@ -229,6 +229,7 @@ export function createArticlePipeline({
     tavilySearch: imageSearch,
     evidence,
     xSearch: editorialXSearch,
+    coverImageGenerator,
     logger,
   });
   const author = authorAgent || (usePiAgent ? createAuthorAgent({ client: llmClient, tools: agentTools, logger }) : null);
@@ -414,9 +415,24 @@ export function createArticlePipeline({
           if (relatedJobs.length) await markMerged(job, relatedJobs);
           return prisma.earlyBirdArticleJob.update({ where: { id: job.id }, data: { status: 'rendered', html, markdown: article.markdown, metadata } });
         }
-        let cover;
-        try { cover = await coverImageGenerator.generate({ postId: job.post.postId, title: article.title, digest: article.digest, analysis, editorial, previous: metadata.cover }); }
-        catch (error) { logger.warn?.('EarlyBird cover generation failed; using a verified article visual', job.id, error.message); }
+        let cover = article.generatedCover;
+        if (!cover) {
+          try {
+            cover = await coverImageGenerator.generate({
+              postId: job.post.postId,
+              title: article.title,
+              digest: article.digest,
+              analysis,
+              editorial,
+              prompt: article.coverPrompt || article.coverDesign?.prompt,
+              coverPrompt: article.coverPrompt || article.coverDesign?.prompt,
+              style: article.coverDesign?.style,
+              previous: metadata.cover,
+            });
+          } catch (error) {
+            logger.warn?.('EarlyBird cover generation failed; using a verified article visual', job.id, error.message);
+          }
+        }
         const thumbPath = cover?.localPath || usedVisuals[0]?.localPath;
         if (!thumbPath) return manualReview(job, metadata, '没有可用于公众号封面的已验证图片');
         const thumb = await wechatClient.uploadPermanentMaterial(thumbPath, 'thumb');

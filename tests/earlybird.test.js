@@ -982,6 +982,15 @@ describe('WeChat cover generation', () => {
     expect(result).toEqual({ status: 'disabled', reason: 'cover image generation is disabled by configuration' });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('uses the Agent custom prompt when provided to buildCoverPrompt', () => {
+    const prompt = buildCoverPrompt({
+      title: '量子计算突破',
+      prompt: 'a glowing quantum processor floating above neon liquid, dark background, no text',
+    });
+    expect(prompt).toContain('Depict: a glowing quantum processor floating above neon liquid, dark background, no text.');
+    expect(prompt).toContain('Do not include any text');
+  });
 });
 
 function draftPipelineFixture(coverImageGenerator) {

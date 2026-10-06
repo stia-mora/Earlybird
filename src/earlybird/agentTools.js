@@ -309,6 +309,64 @@ export function createSearchXPostsTool({ xSearch, logger = console } = {}) {
 }
 
 /**
+ * Tool 6: 封面图创作与生成 (generate_cover_image)
+ * Agent 自主构思视觉隐喻并调用图像模型生成 900x383 微信公众号封面图。
+ */
+export function createGenerateCoverImageTool({ coverImageGenerator, logger = console } = {}) {
+  return {
+    name: 'generate_cover_image',
+    label: '公众号封面图生成',
+    description: '由 Agent 自主构思创意视觉隐喻，调用图像模型生成符合微信公众号规范（900x383, 2.35:1 宽幅无字科技插画）的文章封面。',
+    parameters: Type.Object({
+      prompt: Type.String({ description: '由你自主构思的英文生图提示词或视觉主体隐喻描述，例如 "a glowing robotic arm delicately adjusting an intricate holographic clockwork mechanism, dark cosmic background with cyan and warm amber rim lights, minimalist 3D rendering, no text"' }),
+      visualMetaphor: Type.Optional(Type.String({ description: '中文视觉隐喻构思说明，阐释为什么这样设计封面' })),
+      style: Type.Optional(Type.String({ description: '可选风格预设：editorial（科技编辑，默认）/ cyberpunk（赛博朋克）/ minimalist（极简3D）/ clay（粘土）/ photorealistic（微距拟真）/ flat（扁平矢量）' })),
+      postId: Type.Optional(Type.String({ description: '推文或文章任务 ID' })),
+    }),
+    execute: async (_toolCallId, params) => {
+      try {
+        if (!coverImageGenerator) {
+          return {
+            content: [{ type: 'text', text: '封面图生成器未配置或不可用' }],
+            details: { error: 'coverImageGenerator not configured' },
+            isError: true,
+          };
+        }
+        const result = await coverImageGenerator.generate({
+          postId: params.postId || `agent-cover-${Date.now()}`,
+          prompt: params.prompt,
+          coverPrompt: params.prompt,
+          style: params.style,
+          analysis: { facts: [] },
+          editorial: { contentType: 'brief' },
+        });
+        if (result.status === 'disabled') {
+          return {
+            content: [{ type: 'text', text: '封面生图已在配置中禁用，将降级使用文章正文素材' }],
+            details: result,
+          };
+        }
+        return {
+          content: [{
+            type: 'text',
+            text: `封面图生成成功！\n文件路径: ${result.localPath}\n尺寸: ${result.width}x${result.height} (${result.aspect})\n采用模型: ${result.model}\n视觉构思: ${params.visualMetaphor || '自主构思'}`,
+          }],
+          details: { ...result, visualMetaphor: params.visualMetaphor, prompt: params.prompt },
+          structuredContent: { ...result, visualMetaphor: params.visualMetaphor, prompt: params.prompt },
+        };
+      } catch (err) {
+        logger.warn?.('generate_cover_image tool failed:', err.message);
+        return {
+          content: [{ type: 'text', text: `封面图生成失败：${err.message}` }],
+          details: { error: err.message },
+          isError: true,
+        };
+      }
+    },
+  };
+}
+
+/**
  * 集中创建并打包 EarlyBird Pi Agent 工具集合
  */
 export function createEarlyBirdTools({
@@ -320,6 +378,7 @@ export function createEarlyBirdTools({
   mediaDir,
   runValidator,
   xSearch,
+  coverImageGenerator,
   logger = console,
 } = {}) {
   const fetchTweetThread = createFetchTweetThreadTool({ scraperFactory, defaultScraper, logger });
@@ -327,6 +386,7 @@ export function createEarlyBirdTools({
   const captureTweetEvidence = createCaptureTweetEvidenceTool({ evidence, mediaDir, logger });
   const renderGzhDraft = createRenderGzhDraftTool({ runValidator, logger });
   const searchXPosts = createSearchXPostsTool({ xSearch, logger });
+  const generateCoverImage = createGenerateCoverImageTool({ coverImageGenerator, logger });
 
-  return [fetchTweetThread, searchWebResearch, captureTweetEvidence, renderGzhDraft, searchXPosts];
+  return [fetchTweetThread, searchWebResearch, captureTweetEvidence, renderGzhDraft, searchXPosts, generateCoverImage];
 }
