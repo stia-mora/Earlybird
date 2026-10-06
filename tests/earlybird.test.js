@@ -19,7 +19,7 @@ import { enqueueInterruptedJobs, enqueueLegacyEditorialJobs } from '../src/early
 import { buildDailySummary } from '../src/earlybird/dailySummary.js';
 import { createHermesNotifier } from '../src/earlybird/hermesNotifier.js';
 import { availableFixedEndVisuals } from '../src/earlybird/fixedEndVisuals.js';
-import { buildCoverPrompt, createCoverImageGenerator, normalizeCoverImage, WECHAT_COVER_SIZE } from '../src/earlybird/coverImage.js';
+import { buildCoverPrompt, COVER_STYLE_PRESETS, createCoverImageGenerator, normalizeCoverImage, WECHAT_COVER_SIZE } from '../src/earlybird/coverImage.js';
 import { createEditorialOrchestrator, createEditorialReviewer, draftQualityIssues, normalizeEditorialDecision, normalizeScreening } from '../src/earlybird/editorialReview.js';
 import { gatherEditorialResearch, normalizeResearchPlan, selectEditorialResearch } from '../src/earlybird/editorialResearch.js';
 import { createEditorialXSearch } from '../src/earlybird/xResearchSearch.js';
@@ -952,6 +952,36 @@ describe('WeChat cover generation', () => {
     expect(prompt).toContain('AI 代理进入生产环境');
     expect(prompt).toContain('Do not include any text');
   });
+
+  it('supports style presets, custom style prompt, and negative prompt in buildCoverPrompt', () => {
+    const cyberpunkPrompt = buildCoverPrompt({
+      title: '量子计算突破',
+      digest: '新型量子比特架构发布。',
+      style: 'cyberpunk',
+    });
+    expect(cyberpunkPrompt).toContain(COVER_STYLE_PRESETS.cyberpunk);
+
+    const customPrompt = buildCoverPrompt({
+      title: '量子计算突破',
+      stylePrompt: 'Design system: custom aesthetic; dark futuristic matrix style; text = none.',
+      negativePrompt: 'no animals, no vehicles',
+    });
+    expect(customPrompt).toContain('Design system: custom aesthetic; dark futuristic matrix style; text = none.');
+    expect(customPrompt).toContain('no animals, no vehicles');
+  });
+
+  it('skips image API and returns disabled status when enabled is false', async () => {
+    const fetchImpl = vi.fn();
+    const generator = createCoverImageGenerator({
+      enabled: false,
+      apiKey: 'test-key',
+      baseUrl: 'https://images.test',
+      fetchImpl,
+    });
+    const result = await generator.generate({ postId: 'p1', title: '测试' });
+    expect(result).toEqual({ status: 'disabled', reason: 'cover image generation is disabled by configuration' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });
 
 function draftPipelineFixture(coverImageGenerator) {
@@ -1033,6 +1063,21 @@ describe('cover image pipeline integration', () => {
       await expect(pipeline.process('j-cover')).resolves.toMatchObject({ status: 'verified' });
       expect(wechatClient.uploadPermanentMaterial).toHaveBeenCalledWith(sourceImage.localPath, 'thumb');
       expect(updates.some(update => update.metadata?.cover?.status === 'source-fallback')).toBe(true);
+    } finally {
+      if (originalWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
+      else process.env.EARLYBIRD_THREAD_WAIT_MS = originalWait;
+    }
+  });
+
+  it('falls back to the verified article image when cover generation is disabled', async () => {
+    const coverImageGenerator = { generate: vi.fn(async () => ({ status: 'disabled', reason: 'cover image generation is disabled by configuration' })) };
+    const { pipeline, wechatClient, sourceImage, updates } = draftPipelineFixture(coverImageGenerator);
+    const originalWait = process.env.EARLYBIRD_THREAD_WAIT_MS;
+    process.env.EARLYBIRD_THREAD_WAIT_MS = '0';
+    try {
+      await expect(pipeline.process('j-cover')).resolves.toMatchObject({ status: 'verified' });
+      expect(wechatClient.uploadPermanentMaterial).toHaveBeenCalledWith(sourceImage.localPath, 'thumb');
+      expect(updates.some(update => update.metadata?.cover?.status === 'disabled')).toBe(true);
     } finally {
       if (originalWait === undefined) delete process.env.EARLYBIRD_THREAD_WAIT_MS;
       else process.env.EARLYBIRD_THREAD_WAIT_MS = originalWait;

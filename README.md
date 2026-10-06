@@ -187,8 +187,12 @@ node --env-file=.env src/earlybird/worker.js
 | `EARLYBIRD_X_PROXY` | X 采集使用的 HTTP / SOCKS 代理 |
 | `EARLYBIRD_LLM_FALLBACK_API_KEY` / `BASE_URL` / `MODEL` | 主模型失败后使用的备用模型，对应变量均以 `EARLYBIRD_LLM_FALLBACK_` 开头 |
 | `EARLYBIRD_TAVILY_API_KEY` | 全网资料搜索与配图搜索 |
+| `EARLYBIRD_COVER_IMAGE_ENABLED` | 是否启用封面生图，默认 `true`（设为 `false` 直接使用正文已验证配图） |
 | `EARLYBIRD_COVER_IMAGE_API_KEY` / `BASE_URL` / `MODEL` | 独立封面生成服务，对应变量均以 `EARLYBIRD_COVER_IMAGE_` 开头 |
 | `EARLYBIRD_COVER_IMAGE_FALLBACK_API_KEY` / `BASE_URL` / `MODEL` | 备用封面服务，对应变量均以 `EARLYBIRD_COVER_IMAGE_FALLBACK_` 开头 |
+| `EARLYBIRD_COVER_IMAGE_STYLE` | 封面视觉风格预设（`editorial`、`cyberpunk`、`minimalist`、`clay`、`photorealistic`、`flat`） |
+| `EARLYBIRD_COVER_IMAGE_STYLE_PROMPT` | 自定义封面设计系统提示词（覆盖默认预设） |
+| `EARLYBIRD_COVER_IMAGE_NEGATIVE_PROMPT` | 自定义追加的封面负向提示词 |
 | `EARLYBIRD_STT_API_KEY` / `EARLYBIRD_STT_MODEL` | 视频音频转写 |
 | `EARLYBIRD_PUBLIC_MEDIA_URL` | 可公开访问的媒体基础 URL |
 | `EARLYBIRD_HOST_MEDIA_DIR` | 通知中展示的宿主机媒体绝对路径，需要改为实际目录 |
@@ -197,7 +201,7 @@ node --env-file=.env src/earlybird/worker.js
 | `EARLYBIRD_DAILY_EDITORIAL_REVIEW_CRON` | 定时复审，默认 `0 9,17 * * *` |
 | `EARLYBIRD_DAILY_SUMMARY_CRON` | 每日汇总，默认 `0 21 * * *` |
 
-封面生成依次尝试主服务、备用服务和原帖素材。缺少可用素材或文章质量未达标时，任务可能进入人工审核；可在任务详情中查看原因。配图来源会被记录，发布前仍需审核素材使用权限。
+封面生成依次尝试主服务、备用服务和正文素材。缺少可用素材或文章质量未达标时，任务可能进入人工审核；可在任务详情中查看原因。配图来源会被记录，发布前仍需审核素材使用权限。
 
 如需固定文末图片，将图片放在 `data/earlybird/media/fixed-end/earlybird-endcard.png`。
 

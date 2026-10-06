@@ -40,7 +40,7 @@
 
 解读写作、润色和审校收到实际候选图片与来源信息，核对画面、版本、条件和读图重点。Markdown 图片 alt 只写一条必要的读图提示，通常一句短话、15 至 35 字，不机械堆齐画面、论点、意义和边界。排版器把它与简洁来源合并为一条图下注释，完整来源链接集中在文末。写作、润色和审校均删除复述正文、选图理由、编辑旁注与反复免责声明等多余解释性小字；关键条件在对应正文处交代，仅会导致画面误读的条件保留在短图注中。AI 概念图不能补足事实证据，本次流程仍只自动生成封面；需要编辑解释图但尚无可用素材时保留人工审核缺口。
 
-每篇通过审稿的文章会在创建草稿前生成一张 `900×383`（2.35:1）的纯视觉公众号封面，并通过 `material/add_material` 作为草稿封面上传；封面不插入正文。封面提示词和图片保存在 `data/earlybird/media/covers/<post-id>/`，重试会复用有效封面，避免再次调用图像模型。图像主模型由 `EARLYBIRD_COVER_IMAGE_MODEL` 配置，失败时自动改用 `EARLYBIRD_COVER_IMAGE_FALLBACK_MODEL`；两者都不可用时，流水线回退到已验证的正文视觉素材。视频转码为 H.264/AAC，生成封面和关键帧，但不再自动上传至微信素材库。原始 MP4 会保留在 `data/earlybird/media`，草稿通知会提示文件名供人工审核上传。正文仍使用原帖图片、关键帧和视频摘要，不生成不稳定的 `<video>` 标签。
+每篇通过审稿的文章会在创建草稿前生成一张 `900×383`（2.35:1）的纯视觉公众号封面，并通过 `material/add_material` 作为草稿封面上传；封面不插入正文。封面提示词和图片保存在 `data/earlybird/media/covers/<post-id>/`，重试会复用有效封面，避免再次调用图像模型。封面生成可通过 `EARLYBIRD_COVER_IMAGE_ENABLED` 控制开关（设为 `false` 直接复用已验证的正文配图或原帖截图）。图像风格可通过 `EARLYBIRD_COVER_IMAGE_STYLE` 切换（预设包括 `editorial`、`cyberpunk`、`minimalist`、`clay`、`photorealistic`、`flat`），或通过 `EARLYBIRD_COVER_IMAGE_STYLE_PROMPT` 完全自定义设计系统提示词，并通过 `EARLYBIRD_COVER_IMAGE_NEGATIVE_PROMPT` 扩充负向提示词。图像主模型由 `EARLYBIRD_COVER_IMAGE_MODEL` 配置，失败时自动改用 `EARLYBIRD_COVER_IMAGE_FALLBACK_MODEL`；两者都不可用或禁用时，流水线回退到已验证的正文视觉素材。视频转码为 H.264/AAC，生成封面和关键帧，但不再自动上传至微信素材库。原始 MP4 会保留在 `data/earlybird/media`，草稿通知会提示文件名供人工审核上传。正文仍使用原帖图片、关键帧和视频摘要，不生成不稳定的 `<video>` 标签。
 
 文末紧跟在参考资料之后使用固定的栏目尾图。图片为 `data/earlybird/media/fixed-end/earlybird-endcard.png`，后续所有草稿会自动上传并插入文末。图片缺失时不会插入占位图。
 
